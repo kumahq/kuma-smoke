@@ -11,6 +11,7 @@ import (
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
 	"github.com/kumahq/kuma-smoke/internal"
 	cluster_builders "github.com/kumahq/kuma-smoke/pkg/cluster-builders"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-builders/gke"
 	"github.com/spf13/cobra"
 	"slices"
 	"strings"
