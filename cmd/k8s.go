@@ -9,8 +9,8 @@ import (
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/kuma"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
-	"github.com/kumahq/kuma-smoke-test/internal"
-	cluster_builders "github.com/kumahq/kuma-smoke-test/pkg/cluster-builders"
+	"github.com/kumahq/kuma-smoke/internal"
+	cluster_builders "github.com/kumahq/kuma-smoke/pkg/cluster-builders"
 	"github.com/spf13/cobra"
 	"slices"
 	"strings"
@@ -45,9 +45,10 @@ var k8sDeployCmd = &cobra.Command{
 
 		envBuilder := environments.NewBuilder()
 		randomName := strings.Replace(envBuilder.Name, "-", "", -1)
-		envBuilder = envBuilder.WithName("smoke-" + randomName[len(randomName)-10:])
+		envBuilder = envBuilder.WithName("kuma-smoke-" + randomName[len(randomName)-10:])
 
-		clsBuilder := cluster_builders.GetRegisteredBuilder(k8sDeployOpt.envPlatform)
+		err, clsBuilder := cluster_builders.GetRegisteredBuilder(k8sDeployOpt.envPlatform, cmd, envBuilder.Name)
+		cobra.CheckErr(err)
 		if clsBuilder != nil {
 			envBuilder = envBuilder.WithClusterBuilder(clsBuilder)
 		} else {
@@ -127,7 +128,7 @@ var k8sDeployOpt = deployOptions{}
 var smokeLabel = ""
 
 func init() {
-	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.productName, "kuma", "", "The name of the product, will be used in resources on the cluster. Supported values are: kuma, kong-mesh")
+	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.productName, "product", "kuma", "The name of the product, will be used in resources on the cluster. Supported values are: kuma, kong-mesh")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.chartRepo, "chart-repo", "kumahq.github.io/charts", "The helm charts repository to download installer from")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.version, "version", internal.DefaultKumaVersion, "The version to install. By default, it will get the latest version from the source code repo")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubernetesVersion, "kubernetes-version", internal.DefaultKubernetesVersion, "The version of Kubernetes to deploy")

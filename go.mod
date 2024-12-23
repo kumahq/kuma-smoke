@@ -1,4 +1,4 @@
-module github.com/kumahq/kuma-smoke-test
+module github.com/kumahq/kuma-smoke
 
 go 1.22.0
 
