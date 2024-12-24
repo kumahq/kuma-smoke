@@ -1,0 +1,8 @@
+helmChartName: kuma
+helmRepoUrl: https://kumahq.github.io/charts
+helmChartPath: "kuma/kuma"
+helmSubChartPrefix:
+imageRegistry: kumahq
+namespace: kuma-system
+serviceName: kuma-control-plane
+defaultClusterStartupRetries: 60 # bump this value because fetching containers may take more time than usual
