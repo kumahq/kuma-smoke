@@ -14,6 +14,7 @@ func (kindProvider) ClusterProvider(_ *cobra.Command, _ string) (clusters.Builde
 	// kind builtin supported by KTF, so don't need to do anything here
 	return nil, nil
 }
+
 func (kindProvider) NewFromExisting(_ context.Context, _ *cobra.Command, envName string) (clusters.Cluster, error) {
 	return kind.NewFromExisting(envName)
 }

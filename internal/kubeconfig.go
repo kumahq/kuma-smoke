@@ -9,6 +9,7 @@ import (
 )
 
 func convertToClientCmdConfig(envName string, config *rest.Config) *clientcmdapi.Config {
+	// caller should parse env name from the output (.clusters[0].cluster.name)
 	return &clientcmdapi.Config{
 		Clusters: map[string]*clientcmdapi.Cluster{
 			envName: {

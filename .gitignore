@@ -2,3 +2,8 @@
 
 # ignore the compiled binary
 kuma-smoke
+
+build
+kuma
+
+raw-report.json

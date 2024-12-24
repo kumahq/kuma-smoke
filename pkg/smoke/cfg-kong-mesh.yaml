@@ -1,0 +1,8 @@
+helmChartName: kong-mesh
+helmRepoUrl: https://kong.github.io/kong-mesh-charts
+helmChartPath: "kong-mesh/kong-mesh"
+helmSubChartPrefix: kuma.
+imageRegistry: kong
+namespace: kong-mesh-system
+serviceName: kong-mesh-control-plane
+defaultClusterStartupRetries: 60 # bump this value because fetching containers may take more time than usual
