@@ -55,20 +55,21 @@ var k8sDeployCmd = &cobra.Command{
 		}
 		envBuilder = configureAddons(envBuilder)
 
-		internal.CmdStdout(cmd, "building new environment %s\n", envBuilder.Name)
+		internal.CmdStdErr(cmd, "building new environment %s\n", envBuilder.Name)
 		env, err := envBuilder.Build(ctx)
 		cobra.CheckErr(err)
 
 		addons := env.Cluster().ListAddons()
 		for _, addon := range addons {
-			internal.CmdStdout(cmd, "waiting for addon %s to become ready...\n", addon.Name())
+			internal.CmdStdErr(cmd, "waiting for addon %s to become ready...\n", addon.Name())
 		}
 
-		internal.CmdStdout(cmd, "waiting for environment to become ready (this can take some time)...\n")
+		internal.CmdStdErr(cmd, "waiting for environment to become ready (this can take some time)...\n")
 		cobra.CheckErr(<-env.WaitForReady(ctx))
 
-		internal.CmdStdout(cmd, "environment %s was created successfully!\n", env.Name())
+		internal.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
 
+		cobra.CheckErr(internal.WriteKubeconfig(envName, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
 		return nil
 	},
 }
@@ -106,7 +107,7 @@ var k8sSmokeCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		internal.CmdStdout(cmd, "using existing cluster of environment %s\n", envName)
-		//existingCls.Client()
+		existingCls.Client()
 		// todo: run the smoke tests
 
 		return nil
@@ -131,7 +132,7 @@ func validatePlatformName(platform string) error {
 }
 
 var k8sCmd = &cobra.Command{
-	Use:   "k8s",
+	Use:   "kubernetes",
 	Short: "Prepare and run smoke tests for Kuma on Kubernetes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return errors.New("must pass a subcommand")
@@ -139,10 +140,11 @@ var k8sCmd = &cobra.Command{
 }
 
 type deployOptions struct {
-	productName       string
-	chartRepo         string
-	version           string
-	kubernetesVersion string
+	productName          string
+	chartRepo            string
+	version              string
+	kubernetesVersion    string
+	kubeconfigOutputFile string
 
 	parsedProductVersion semver.Version
 	parsedK8sVersion     semver.Version
@@ -158,6 +160,8 @@ func init() {
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.chartRepo, "chart-repo", "kumahq.github.io/charts", "The helm charts repository to download installer from")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.version, "version", internal.DefaultKumaVersion, "The version to install. By default, it will get the latest version from the source code repo")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubernetesVersion, "kubernetes-version", internal.DefaultKubernetesVersion, "The version of Kubernetes to deploy")
+	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubeconfigOutputFile, "kubeconfig-output", "", "The file path used to write the generated kubeconfig")
+	_ = k8sDeployCmd.MarkFlagRequired("kubeconfig-output")
 	k8sDeployCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
 		fmt.Sprintf("The platform to deploy the environment on (%s)",
 			strings.Join(cluster_providers.SupportedProviderNames, ",")))
