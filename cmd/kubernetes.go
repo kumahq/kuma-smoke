@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/blang/semver/v4"
-	"github.com/hashicorp/go-multierror"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/kuma"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
@@ -86,18 +85,17 @@ func configureAddons(builder *environments.Builder) *environments.Builder {
 	return builder
 }
 
-var k8sSmokeCmd = &cobra.Command{
-	Use:   "smoke",
-	Short: "run the smoke tests",
+var k8sCleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "cleanup the installed resources during the smoke tests",
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		err = validatePlatformName(envPlatform)
+		err := validatePlatformName(envPlatform)
 		cobra.CheckErr(err)
 
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), internal.SmokeTestRunTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), internal.CleanupTimeout)
 		defer cancel()
 
 		_, err := cluster_providers.GetBuilder(envPlatform, cmd, envName)
@@ -106,20 +104,11 @@ var k8sSmokeCmd = &cobra.Command{
 		existingCls, err := cluster_providers.NewClusterFromExisting(envPlatform, ctx, cmd, envName)
 		cobra.CheckErr(err)
 
-		internal.CmdStdout(cmd, "using existing cluster of environment %s\n", envName)
-		existingCls.Client()
-		// todo: run the smoke tests
+		internal.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", envName)
+		err = existingCls.Cleanup(ctx)
+		cobra.CheckErr(err)
 
 		return nil
-	},
-}
-
-var cleanupK8sCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "cleanup the installed resources during the smoke tests",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		var merr *multierror.Error
-		return merr.ErrorOrNil()
 	},
 }
 
@@ -153,7 +142,6 @@ type deployOptions struct {
 var k8sDeployOpt = deployOptions{}
 var envName = ""
 var envPlatform = ""
-var smokeLabel = ""
 
 func init() {
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.productName, "product", "kuma", "The name of the product, will be used in resources on the cluster. Supported values are: kuma, kong-mesh")
@@ -167,17 +155,9 @@ func init() {
 			strings.Join(cluster_providers.SupportedProviderNames, ",")))
 	k8sCmd.AddCommand(k8sDeployCmd)
 
-	k8sSmokeCmd.Flags().StringVar(&envName, "env", "", "name of the existing environment")
-	k8sSmokeCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
+	k8sCleanupCmd.Flags().StringVar(&envName, "env", "", "name of the existing environment")
+	k8sCleanupCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
 		fmt.Sprintf("The platform that the environment was deployed on (%s)",
 			strings.Join(cluster_providers.SupportedProviderNames, ",")))
-	k8sSmokeCmd.Flags().StringVar(&smokeLabel, "filter", "", "labels to apply to filter the test cases")
-	_ = k8sSmokeCmd.MarkFlagRequired("env")
-	k8sCmd.AddCommand(k8sSmokeCmd)
-
-	cleanupK8sCmd.Flags().StringVar(&envName, "env", "", "name of the existing environment")
-	cleanupK8sCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
-		fmt.Sprintf("The platform that the environment was deployed on (%s)",
-			strings.Join(cluster_providers.SupportedProviderNames, ",")))
-	k8sCmd.AddCommand(cleanupK8sCmd)
+	k8sCmd.AddCommand(k8sCleanupCmd)
 }
