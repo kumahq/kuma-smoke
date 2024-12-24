@@ -10,8 +10,8 @@ import (
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
 	"github.com/kumahq/kuma-smoke/internal"
-	cluster_builders "github.com/kumahq/kuma-smoke/pkg/cluster-builders"
-	_ "github.com/kumahq/kuma-smoke/pkg/cluster-builders/gke"
+	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	"github.com/spf13/cobra"
 	"slices"
 	"strings"
@@ -28,14 +28,12 @@ var k8sDeployCmd = &cobra.Command{
 		k8sDeployOpt.parsedK8sVersion, err = semver.Parse(strings.TrimPrefix(k8sDeployOpt.kubernetesVersion, "v"))
 		cobra.CheckErr(err)
 
-		if !slices.Contains(cluster_builders.SupportedBuilderNames, k8sDeployOpt.envPlatform) {
-			return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported values are: %s",
-				k8sDeployOpt.envPlatform, strings.Join(cluster_builders.SupportedBuilderNames, ", ")))
-		}
+		err = validatePlatformName(envPlatform)
+		cobra.CheckErr(err)
 
 		if !slices.Contains(internal.SupportedProductNames, k8sDeployOpt.productName) {
-			return errors.New(fmt.Sprintf("unsupported product name: '%s'. supported values are: %s",
-				k8sDeployOpt.productName, strings.Join(internal.SupportedProductNames, ", ")))
+			cobra.CheckErr(errors.New(fmt.Sprintf("unsupported product name: '%s'. supported values are: %s",
+				k8sDeployOpt.productName, strings.Join(internal.SupportedProductNames, ", "))))
 		}
 
 		return nil
@@ -48,7 +46,7 @@ var k8sDeployCmd = &cobra.Command{
 		randomName := strings.Replace(envBuilder.Name, "-", "", -1)
 		envBuilder = envBuilder.WithName("kuma-smoke-" + randomName[len(randomName)-10:])
 
-		err, clsBuilder := cluster_builders.GetRegisteredBuilder(k8sDeployOpt.envPlatform, cmd, envBuilder.Name)
+		clsBuilder, err := cluster_providers.GetBuilder(envPlatform, cmd, envBuilder.Name)
 		cobra.CheckErr(err)
 		if clsBuilder != nil {
 			envBuilder = envBuilder.WithClusterBuilder(clsBuilder)
@@ -66,7 +64,7 @@ var k8sDeployCmd = &cobra.Command{
 			internal.CmdStdout(cmd, "waiting for addon %s to become ready...\n", addon.Name())
 		}
 
-		internal.CmdStdout(cmd, "waiting for environment to become ready (this can take some time)...")
+		internal.CmdStdout(cmd, "waiting for environment to become ready (this can take some time)...\n")
 		cobra.CheckErr(<-env.WaitForReady(ctx))
 
 		internal.CmdStdout(cmd, "environment %s was created successfully!\n", env.Name())
@@ -76,7 +74,7 @@ var k8sDeployCmd = &cobra.Command{
 }
 
 func configureAddons(builder *environments.Builder) *environments.Builder {
-	if k8sDeployOpt.envPlatform == "kind" {
+	if envPlatform == "kind" {
 		builder = builder.WithAddons(metallb.New())
 	}
 
@@ -90,9 +88,28 @@ func configureAddons(builder *environments.Builder) *environments.Builder {
 var k8sSmokeCmd = &cobra.Command{
 	Use:   "smoke",
 	Short: "run the smoke tests",
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		err = validatePlatformName(envPlatform)
+		cobra.CheckErr(err)
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var merr *multierror.Error
-		return merr.ErrorOrNil()
+		ctx, cancel := context.WithTimeout(context.Background(), internal.SmokeTestRunTimeout)
+		defer cancel()
+
+		_, err := cluster_providers.GetBuilder(envPlatform, cmd, envName)
+		cobra.CheckErr(err)
+
+		existingCls, err := cluster_providers.NewClusterFromExisting(envPlatform, ctx, cmd, envName)
+		cobra.CheckErr(err)
+
+		internal.CmdStdout(cmd, "using existing cluster of environment %s\n", envName)
+		//existingCls.Client()
+		// todo: run the smoke tests
+
+		return nil
 	},
 }
 
@@ -103,6 +120,14 @@ var cleanupK8sCmd = &cobra.Command{
 		var merr *multierror.Error
 		return merr.ErrorOrNil()
 	},
+}
+
+func validatePlatformName(platform string) error {
+	if !slices.Contains(cluster_providers.SupportedProviderNames, platform) {
+		return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported values are: %s",
+			platform, strings.Join(cluster_providers.SupportedProviderNames, ", ")))
+	}
+	return nil
 }
 
 var k8sCmd = &cobra.Command{
@@ -119,13 +144,13 @@ type deployOptions struct {
 	version           string
 	kubernetesVersion string
 
-	envPlatform string
-
 	parsedProductVersion semver.Version
 	parsedK8sVersion     semver.Version
 }
 
 var k8sDeployOpt = deployOptions{}
+var envName = ""
+var envPlatform = ""
 var smokeLabel = ""
 
 func init() {
@@ -133,13 +158,22 @@ func init() {
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.chartRepo, "chart-repo", "kumahq.github.io/charts", "The helm charts repository to download installer from")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.version, "version", internal.DefaultKumaVersion, "The version to install. By default, it will get the latest version from the source code repo")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubernetesVersion, "kubernetes-version", internal.DefaultKubernetesVersion, "The version of Kubernetes to deploy")
-	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.envPlatform, "env-platform", "kind",
+	k8sDeployCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
 		fmt.Sprintf("The platform to deploy the environment on (%s)",
-			strings.Join(cluster_builders.SupportedBuilderNames, ",")))
-
-	k8sSmokeCmd.Flags().StringVar(&smokeLabel, "filter", "", "labels to apply to filter the test cases")
-
+			strings.Join(cluster_providers.SupportedProviderNames, ",")))
 	k8sCmd.AddCommand(k8sDeployCmd)
+
+	k8sSmokeCmd.Flags().StringVar(&envName, "env", "", "name of the existing environment")
+	k8sSmokeCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
+		fmt.Sprintf("The platform that the environment was deployed on (%s)",
+			strings.Join(cluster_providers.SupportedProviderNames, ",")))
+	k8sSmokeCmd.Flags().StringVar(&smokeLabel, "filter", "", "labels to apply to filter the test cases")
+	_ = k8sSmokeCmd.MarkFlagRequired("env")
 	k8sCmd.AddCommand(k8sSmokeCmd)
+
+	cleanupK8sCmd.Flags().StringVar(&envName, "env", "", "name of the existing environment")
+	cleanupK8sCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",
+		fmt.Sprintf("The platform that the environment was deployed on (%s)",
+			strings.Join(cluster_providers.SupportedProviderNames, ",")))
 	k8sCmd.AddCommand(cleanupK8sCmd)
 }
