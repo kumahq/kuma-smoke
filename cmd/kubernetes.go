@@ -11,7 +11,7 @@ import (
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
-	"github.com/kumahq/kuma-smoke/pkg/smoke"
+	"github.com/kumahq/kuma-smoke/test"
 	"github.com/spf13/cobra"
 	"slices"
 	"strings"
@@ -25,11 +25,11 @@ var k8sDeployCmd = &cobra.Command{
 		k8sDeployOpt.parsedK8sVersion, err = semver.Parse(strings.TrimPrefix(k8sDeployOpt.kubernetesVersion, "v"))
 		cobra.CheckErr(err)
 
-		kumaMinSupported := semver.MustParse(smoke.MinSupportedKubernetesVer)
+		kumaMinSupported := semver.MustParse(test.MinSupportedKubernetesVer)
 		if k8sDeployOpt.parsedK8sVersion.Major < kumaMinSupported.Major ||
 			(k8sDeployOpt.parsedK8sVersion.Major == kumaMinSupported.Major && k8sDeployOpt.parsedK8sVersion.Minor < kumaMinSupported.Minor) {
 			internal.CmdStdErr(cmd, "Warning: deploying a Kubernetes cluster older than the minimal supported version by Kuma. "+
-				"The minimal supported version by Kuma is %s\n", smoke.MinSupportedKubernetesVer)
+				"The minimal supported version by Kuma is %s\n", test.MinSupportedKubernetesVer)
 		}
 
 		err = validatePlatformName(envPlatform)
@@ -137,7 +137,7 @@ var envName = ""
 var envPlatform = ""
 
 func init() {
-	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubernetesVersion, "kubernetes-version", smoke.MaxSupportedKubernetesVer, "The version of Kubernetes to deploy")
+	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubernetesVersion, "kubernetes-version", test.MaxSupportedKubernetesVer, "The version of Kubernetes to deploy")
 	k8sDeployCmd.Flags().StringVar(&k8sDeployOpt.kubeconfigOutputFile, "kubeconfig-output", "", "The file path used to write the generated kubeconfig")
 	_ = k8sDeployCmd.MarkFlagRequired("kubeconfig-output")
 	k8sDeployCmd.Flags().StringVar(&envPlatform, "env-platform", "kind",

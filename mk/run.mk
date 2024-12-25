@@ -29,5 +29,5 @@ cleanup-kubernetes:
 
 .PHONY: run
 run: fetch-product deploy-kubernetes
-	$(E2E_ENV_VARS) KUBECONFIG=$(TOP)/build/kubernetes/cluster.config $(GINKGO) -v --timeout=4h --json-report=raw-report.json ./pkg/smoke/...
+	$(E2E_ENV_VARS) KUBECONFIG=$(TOP)/build/kubernetes/cluster.config $(GINKGO) -v --timeout=4h --json-report=raw-report.json ./test/...
 	$(MAKE) cleanup-kubernetes
