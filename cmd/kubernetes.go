@@ -110,8 +110,8 @@ var k8sCleanupCmd = &cobra.Command{
 
 func validatePlatformName(platform string) error {
 	if !slices.Contains(cluster_providers.SupportedProviderNames, platform) {
-		return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported platforms are: %s",
-			platform, strings.Join(cluster_providers.SupportedProviderNames, ", ")))
+		return fmt.Errorf("unsupported platform: '%s'. supported platforms are: %s",
+			platform, strings.Join(cluster_providers.SupportedProviderNames, ", "))
 	}
 	return nil
 }
@@ -127,8 +127,6 @@ var k8sCmd = &cobra.Command{
 type deployOptions struct {
 	kubernetesVersion    string
 	kubeconfigOutputFile string
-
-	parsedProductVersion semver.Version
 	parsedK8sVersion     semver.Version
 }
 
