@@ -1,0 +1,54 @@
+name: Build
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: make deps
+        run: make deps
+      - name: make check
+        run: make check
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=10m --verbose
+          skip-pkg-cache: true
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: make deps
+        run: make deps
+      - name: make build
+        run: make build
+      - name: make run
+        run: make run
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: smoke-report
+          if-no-files-found: ignore
+          path: |
+            raw-report.json
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 15 }}

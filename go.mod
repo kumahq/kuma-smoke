@@ -14,10 +14,13 @@ require (
 	k8s.io/api v0.31.3 // indirect
 	k8s.io/apimachinery v0.31.3 // indirect
 	k8s.io/client-go v0.31.3
-	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
+	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8 // indirect
 )
 
-require github.com/kennygrant/sanitize v1.2.4
+require (
+	github.com/gruntwork-io/terratest v0.47.2
+	github.com/kennygrant/sanitize v1.2.4 // indirect
+)
 
 require (
 	cel.dev/expr v0.16.0 // indirect
@@ -84,7 +87,6 @@ require (
 	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/gruntwork-io/go-commons v0.8.0 // indirect
-	github.com/gruntwork-io/terratest v0.47.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hoisie/mustache v0.0.0-20160804235033-6375acf62c69 // indirect
