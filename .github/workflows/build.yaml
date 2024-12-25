@@ -33,6 +33,7 @@ jobs:
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
