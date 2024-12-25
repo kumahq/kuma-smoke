@@ -10,6 +10,7 @@ import (
 	"github.com/kumahq/kuma-smoke/internal"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
 	"github.com/kumahq/kuma-smoke/pkg/smoke"
 	"github.com/spf13/cobra"
 	"slices"
@@ -67,7 +68,7 @@ var k8sDeployCmd = &cobra.Command{
 
 		internal.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
 
-		cobra.CheckErr(internal.WriteKubeconfig(envName, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
+		cobra.CheckErr(internal.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
 		return nil
 	},
 }
@@ -109,7 +110,7 @@ var k8sCleanupCmd = &cobra.Command{
 
 func validatePlatformName(platform string) error {
 	if !slices.Contains(cluster_providers.SupportedProviderNames, platform) {
-		return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported values are: %s",
+		return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported platforms are: %s",
 			platform, strings.Join(cluster_providers.SupportedProviderNames, ", ")))
 	}
 	return nil
