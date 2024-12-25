@@ -7,6 +7,20 @@ updates:
     open-pull-requests-limit: 15
     labels:
       - "dependencies"
+    groups:
+      k8s-libs:
+        patterns:
+          - "*k8s.io/*"
+      go.opentelemetry.io:
+        patterns:
+          - "go.opentelemetry.io/*"
+    ignore:
+      # go-control-plane v0.12.0 introduced a potential deadlock issue. This issue is
+      # being tracked in https://github.com/envoyproxy/go-control-plane/issues/875.
+      # Remove this once the issue is resolved.
+      - dependency-name: github.com/envoyproxy/go-control-plane
+      # Kuma is going to be maintained manually (we'll build a workflow to track it)
+      - dependency-name: github.com/kumahq/kuma
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -14,3 +28,4 @@ updates:
     open-pull-requests-limit: 15
     labels:
       - "dependencies"
+      - "ci/skip-test"
