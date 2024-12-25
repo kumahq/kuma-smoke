@@ -2,7 +2,6 @@ package cluster_providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters"
 	"github.com/spf13/cobra"
@@ -26,7 +25,7 @@ func GetBuilder(providerName string, cmd *cobra.Command, envName string) (cluste
 		return provider.ClusterProvider(cmd, envName)
 	}
 
-	return nil, errors.New(fmt.Sprintf("environment platform not supported: %s", providerName))
+	return nil, fmt.Errorf("environment platform not supported: %s", providerName)
 }
 
 func NewClusterFromExisting(providerName string, ctx context.Context, cmd *cobra.Command, envName string) (clusters.Cluster, error) {
@@ -34,5 +33,5 @@ func NewClusterFromExisting(providerName string, ctx context.Context, cmd *cobra
 		return provider.NewFromExisting(ctx, cmd, envName)
 	}
 
-	return nil, errors.New(fmt.Sprintf("environment platform not supported: %s", providerName))
+	return nil, fmt.Errorf("environment platform not supported: %s", providerName)
 }

@@ -8,6 +8,8 @@ on:
     branches:
       - main
 env:
+  SMOKE_PRODUCT_NAME: "kuma"
+  SMOKE_PRODUCT_VERSION: "2.9.2"
   CI_TOOLS_DIR: "/home/runner/work/kuma-smoke/.ci_tools"
 jobs:
   check:
@@ -29,9 +31,11 @@ jobs:
         with:
           version: latest
           args: --timeout=10m --verbose
-          skip-pkg-cache: true
+          skip-cache: true
   build-test:
     name: Build and test
+    needs:
+      - check
     runs-on: ubuntu-latest
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:

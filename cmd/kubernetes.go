@@ -7,10 +7,10 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
-	"github.com/kumahq/kuma-smoke/internal"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
+	"github.com/kumahq/kuma-smoke/pkg/utils"
 	"github.com/kumahq/kuma-smoke/test"
 	"github.com/spf13/cobra"
 	"slices"
@@ -28,7 +28,7 @@ var k8sDeployCmd = &cobra.Command{
 		kumaMinSupported := semver.MustParse(test.MinSupportedKubernetesVer)
 		if k8sDeployOpt.parsedK8sVersion.Major < kumaMinSupported.Major ||
 			(k8sDeployOpt.parsedK8sVersion.Major == kumaMinSupported.Major && k8sDeployOpt.parsedK8sVersion.Minor < kumaMinSupported.Minor) {
-			internal.CmdStdErr(cmd, "Warning: deploying a Kubernetes cluster older than the minimal supported version by Kuma. "+
+			utils.CmdStdErr(cmd, "Warning: deploying a Kubernetes cluster older than the minimal supported version by Kuma. "+
 				"The minimal supported version by Kuma is %s\n", test.MinSupportedKubernetesVer)
 		}
 
@@ -38,7 +38,7 @@ var k8sDeployCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), internal.EnvironmentCreateTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), utils.EnvironmentCreateTimeout)
 		defer cancel()
 
 		envBuilder := environments.NewBuilder()
@@ -54,21 +54,21 @@ var k8sDeployCmd = &cobra.Command{
 		}
 		envBuilder = configureAddons(envBuilder)
 
-		internal.CmdStdErr(cmd, "building new environment %s\n", envBuilder.Name)
+		utils.CmdStdErr(cmd, "building new environment %s\n", envBuilder.Name)
 		env, err := envBuilder.Build(ctx)
 		cobra.CheckErr(err)
 
 		addons := env.Cluster().ListAddons()
 		for _, addon := range addons {
-			internal.CmdStdErr(cmd, "waiting for addon %s to become ready...\n", addon.Name())
+			utils.CmdStdErr(cmd, "waiting for addon %s to become ready...\n", addon.Name())
 		}
 
-		internal.CmdStdErr(cmd, "waiting for environment to become ready (this can take some time)...\n")
+		utils.CmdStdErr(cmd, "waiting for environment to become ready (this can take some time)...\n")
 		cobra.CheckErr(<-env.WaitForReady(ctx))
 
-		internal.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
+		utils.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
 
-		cobra.CheckErr(internal.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
+		cobra.CheckErr(utils.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
 		return nil
 	},
 }
@@ -91,7 +91,7 @@ var k8sCleanupCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), internal.CleanupTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), utils.CleanupTimeout)
 		defer cancel()
 
 		_, err := cluster_providers.GetBuilder(envPlatform, cmd, envName)
@@ -100,7 +100,7 @@ var k8sCleanupCmd = &cobra.Command{
 		existingCls, err := cluster_providers.NewClusterFromExisting(envPlatform, ctx, cmd, envName)
 		cobra.CheckErr(err)
 
-		internal.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", envName)
+		utils.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", envName)
 		err = existingCls.Cleanup(ctx)
 		cobra.CheckErr(err)
 
@@ -110,8 +110,8 @@ var k8sCleanupCmd = &cobra.Command{
 
 func validatePlatformName(platform string) error {
 	if !slices.Contains(cluster_providers.SupportedProviderNames, platform) {
-		return errors.New(fmt.Sprintf("unsupported platform: '%s'. supported platforms are: %s",
-			platform, strings.Join(cluster_providers.SupportedProviderNames, ", ")))
+		return fmt.Errorf("unsupported platform: '%s'. supported platforms are: %s",
+			platform, strings.Join(cluster_providers.SupportedProviderNames, ", "))
 	}
 	return nil
 }
@@ -127,8 +127,6 @@ var k8sCmd = &cobra.Command{
 type deployOptions struct {
 	kubernetesVersion    string
 	kubeconfigOutputFile string
-
-	parsedProductVersion semver.Version
 	parsedK8sVersion     semver.Version
 }
 
