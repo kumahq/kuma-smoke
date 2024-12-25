@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - main
+env:
+  CI_TOOLS_DIR: "/home/runner/work/kuma-smoke/.ci_tools"
 jobs:
   check:
     name: Check
@@ -18,8 +20,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: make deps
-        run: make deps
+      - name: make dev/tools
+        run: make dev/tools
       - name: make check
         run: make check
       - name: golangci-lint
@@ -39,13 +41,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: make deps
-        run: make deps
+      - name: make dev/tools
+        run: |
+          make dev/tools
+          echo "${CI_TOOLS_DIR}/bin" >> $GITHUB_PATH
       - name: make build
         run: make build
       - name: make run
         run: make run
-      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: always()
         with:
           name: smoke-report
