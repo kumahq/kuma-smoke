@@ -7,10 +7,10 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
-	"github.com/kumahq/kuma-smoke/internal"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
+	internal2 "github.com/kumahq/kuma-smoke/pkg/utils"
 	"github.com/kumahq/kuma-smoke/test"
 	"github.com/spf13/cobra"
 	"slices"
@@ -28,7 +28,7 @@ var k8sDeployCmd = &cobra.Command{
 		kumaMinSupported := semver.MustParse(test.MinSupportedKubernetesVer)
 		if k8sDeployOpt.parsedK8sVersion.Major < kumaMinSupported.Major ||
 			(k8sDeployOpt.parsedK8sVersion.Major == kumaMinSupported.Major && k8sDeployOpt.parsedK8sVersion.Minor < kumaMinSupported.Minor) {
-			internal.CmdStdErr(cmd, "Warning: deploying a Kubernetes cluster older than the minimal supported version by Kuma. "+
+			internal2.CmdStdErr(cmd, "Warning: deploying a Kubernetes cluster older than the minimal supported version by Kuma. "+
 				"The minimal supported version by Kuma is %s\n", test.MinSupportedKubernetesVer)
 		}
 
@@ -38,7 +38,7 @@ var k8sDeployCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), internal.EnvironmentCreateTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), internal2.EnvironmentCreateTimeout)
 		defer cancel()
 
 		envBuilder := environments.NewBuilder()
@@ -54,21 +54,21 @@ var k8sDeployCmd = &cobra.Command{
 		}
 		envBuilder = configureAddons(envBuilder)
 
-		internal.CmdStdErr(cmd, "building new environment %s\n", envBuilder.Name)
+		internal2.CmdStdErr(cmd, "building new environment %s\n", envBuilder.Name)
 		env, err := envBuilder.Build(ctx)
 		cobra.CheckErr(err)
 
 		addons := env.Cluster().ListAddons()
 		for _, addon := range addons {
-			internal.CmdStdErr(cmd, "waiting for addon %s to become ready...\n", addon.Name())
+			internal2.CmdStdErr(cmd, "waiting for addon %s to become ready...\n", addon.Name())
 		}
 
-		internal.CmdStdErr(cmd, "waiting for environment to become ready (this can take some time)...\n")
+		internal2.CmdStdErr(cmd, "waiting for environment to become ready (this can take some time)...\n")
 		cobra.CheckErr(<-env.WaitForReady(ctx))
 
-		internal.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
+		internal2.CmdStdErr(cmd, "environment %s was created successfully!\n", env.Name())
 
-		cobra.CheckErr(internal.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
+		cobra.CheckErr(internal2.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
 		return nil
 	},
 }
@@ -91,7 +91,7 @@ var k8sCleanupCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), internal.CleanupTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), internal2.CleanupTimeout)
 		defer cancel()
 
 		_, err := cluster_providers.GetBuilder(envPlatform, cmd, envName)
@@ -100,7 +100,7 @@ var k8sCleanupCmd = &cobra.Command{
 		existingCls, err := cluster_providers.NewClusterFromExisting(envPlatform, ctx, cmd, envName)
 		cobra.CheckErr(err)
 
-		internal.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", envName)
+		internal2.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", envName)
 		err = existingCls.Cleanup(ctx)
 		cobra.CheckErr(err)
 
