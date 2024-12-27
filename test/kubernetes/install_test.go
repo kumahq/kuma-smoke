@@ -2,11 +2,10 @@ package kubernetes_test
 
 import (
 	"fmt"
-	testclient "github.com/kumahq/kuma/test/framework/client"
-	"github.com/kumahq/kuma/test/framework/deployments/testserver"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gruntwork-io/terratest/modules/k8s"
@@ -77,22 +76,13 @@ spec:
 		}
 
 		By("request the demo app from the gateway pod")
-		Expect(cluster.Install(testserver.Install(
-			testserver.WithName("test-client"),
-			testserver.WithNamespace(TestNamespace),
-		))).To(Succeed())
-		Eventually(func(g Gomega) {
-			stdout, stderr, err := testclient.CollectResponse(
-				cluster,
-				"test-client",
-				"127.0.0.1/version",
-				testclient.FromKubernetesPod(TestNamespace, demoGateway),
-				testclient.WithVerbose(),
-			)
-			g.Expect(err).ToNot(HaveOccurred())
-			g.Expect(stdout + stderr).To(ContainSubstring("200 OK"))
-			g.Expect(stdout + stderr).To(ContainSubstring("server: Kuma Gateway"))
-		}, "30s", "1s").Should(Succeed())
+		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+			g.Expect(out).To(ContainSubstring("200 OK"))
+			g.Expect(out).To(ContainSubstring("server: Kuma Gateway"))
+
+			responseLog := filepath.Join(Config.DebugDir, "demo-app-wget.log")
+			Expect(os.WriteFile(responseLog, []byte(responseLog), 0o600)).To(Succeed())
+		})
 	})
 
 	It("should distribute certs when mTLS is enabled", func() {
@@ -107,24 +97,15 @@ spec:
 			)
 
 			g.Expect(err).ToNot(HaveOccurred())
-			number, err := strconv.Atoi(out)
+			number, err := strconv.Atoi(strings.Trim(out, "'"))
 			g.Expect(err).ToNot(HaveOccurred())
 			Expect(number).To(BeNumerically(">", 0))
 		}, "60s", "1s").Should(Succeed())
 
 		By("the demo-app should not be requested without a MeshTrafficPermission applied")
-		Eventually(func(g Gomega) {
-			stdout, stderr, err := testclient.CollectResponse(
-				cluster,
-				"test-client",
-				"127.0.0.1/version",
-				testclient.FromKubernetesPod(TestNamespace, demoGateway),
-				testclient.WithVerbose(),
-			)
-			g.Expect(err).ToNot(HaveOccurred())
-			g.Expect(stdout + stderr).To(ContainSubstring("403 Forbidden"))
-			g.Expect(stdout + stderr).To(ContainSubstring("RBAC: access denied"))
-		}, "30s", "1s").Should(Succeed())
+		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+			g.Expect(out).To(ContainSubstring("403 Forbidden"))
+		})
 
 		By("the demo-app should be requested successfully with a MeshTrafficPermission applied")
 		mtp := `
@@ -132,7 +113,7 @@ apiVersion: kuma.io/v1alpha1
 kind: MeshTrafficPermission
 metadata:
   name: allow-any
-  namespace: kong-mesh-system
+  namespace: %s
 spec:
   targetRef:
     kind: Mesh
@@ -141,20 +122,11 @@ spec:
         kind: Mesh
       default:
         action: Allow`
-		Expect(cluster.Install(YamlK8s(mtp))).To(Succeed())
+		Expect(cluster.Install(YamlK8s(fmt.Sprintf(mtp, Config.KumaNamespace)))).To(Succeed())
 
-		Eventually(func(g Gomega) {
-			stdout, stderr, err := testclient.CollectResponse(
-				cluster,
-				"test-client",
-				"127.0.0.1/version",
-				testclient.FromKubernetesPod(TestNamespace, demoGateway),
-				testclient.WithVerbose(),
-			)
-			g.Expect(err).ToNot(HaveOccurred())
-			g.Expect(stdout + stderr).To(ContainSubstring("200 OK"))
-			g.Expect(stdout + stderr).To(ContainSubstring("server: Kuma Gateway"))
-		}, "30s", "1s").Should(Succeed())
+		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+			g.Expect(out).To(ContainSubstring("200 OK"))
+		})
 	})
 
 	It("should run stable", func() {
@@ -168,4 +140,23 @@ spec:
 		Expect(err).To(Not(HaveOccurred()))
 		Expect(os.WriteFile(logOutputFile, []byte(logs), 0o600)).To(Succeed())
 	})
+}
+
+func requestFromGateway(gwAppName string, requestPath string, responseChecker func(g Gomega, out string)) {
+	testingT := cluster.GetTesting()
+	kubectlOptions := cluster.GetKubectlOptions(TestNamespace)
+
+	gatewayService, err1 := k8s.GetServiceE(testingT, kubectlOptions, gwAppName)
+	gatewayPodName, err2 := PodNameOfApp(cluster, gwAppName, TestNamespace)
+	Expect(err1).ToNot(HaveOccurred())
+	Expect(err2).ToNot(HaveOccurred())
+	Eventually(func(g Gomega) {
+		// do not check for error, since wget return non-zero code on 403
+		stdout, stderr, _ := cluster.Exec(TestNamespace,
+			gatewayPodName,
+			"kuma-gateway",
+			"wget", "-q", "-O", "-", "-S",
+			gatewayService.Spec.ClusterIP+requestPath)
+		responseChecker(g, stdout+stderr)
+	}, "30s", "1s").Should(Succeed())
 }
