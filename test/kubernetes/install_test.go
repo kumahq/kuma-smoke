@@ -2,6 +2,8 @@ package kubernetes_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gruntwork-io/terratest/modules/k8s"
@@ -23,11 +25,6 @@ func Install() {
 	E2EAfterAll(func() {
 		Expect(cluster.TriggerDeleteNamespace(TestNamespace)).To(Succeed())
 		Expect(cluster.DeleteKuma()).To(Succeed())
-	})
-
-	It("should deploy the mesh", func() {
-		// just to see stabilized stats before we go further
-		Expect(true).To(BeTrue())
 	})
 
 	It("should deploy mesh wide policy", func() {
@@ -68,8 +65,19 @@ spec:
 				"get", "meshinsights", "default", "-ojsonpath='{.spec.mTLS.issuedBackends.ca-1.total}'",
 			)
 			g.Expect(err).ToNot(HaveOccurred())
-			//g.Expect(out).To(Equal(fmt.Sprintf("'%d'", expectedCerts)))
 		}, "60s", "1s").Should(Succeed())
 		AddReportEntry("certs_propagation_duration", time.Since(propagationStart).Milliseconds())
+	})
+
+	It("should run stable", func() {
+		time.Sleep(10 * time.Second)
+
+		Expect(CpRestarted(cluster)).To(BeFalse(), cluster.Name()+" restarted in this suite, this should not happen.")
+
+		logOutputFile := filepath.Join(Config.DebugDir, fmt.Sprintf("%s-logs.log", Config.KumaServiceName))
+		logs, err := cluster.GetKumaCPLogs()
+
+		Expect(err).To(Not(HaveOccurred()))
+		Expect(os.WriteFile(logOutputFile, []byte(logs), 0o600)).To(Succeed())
 	})
 }

@@ -3,6 +3,7 @@ KUMACTLBIN = $(TOP)/build/$(SMOKE_PRODUCT_NAME)-$(SMOKE_PRODUCT_VERSION)/bin/kum
 E2E_ENV_VARS += KUMA_K8S_TYPE=kind
 E2E_ENV_VARS += TEST_ROOT="$(TOP)"
 E2E_ENV_VARS += E2E_CONFIG_FILE="$(TOP)/test/cfg-$(SMOKE_PRODUCT_NAME).yaml"
+E2E_ENV_VARS += KUMA_DEBUG_DIR="$(TOP)/build/debug-output"
 E2E_ENV_VARS += KUMACTLBIN="$(KUMACTLBIN)"
 
 INSTALLER_URL=https://kuma.io/installer.sh
@@ -29,5 +30,6 @@ cleanup-kubernetes:
 
 .PHONY: run
 run: fetch-product deploy-kubernetes
+	mkdir -p $(TOP)/build/debug-output
 	$(E2E_ENV_VARS) KUBECONFIG=$(TOP)/build/kubernetes/cluster.config $(GINKGO) -v --timeout=4h --json-report=raw-report.json ./test/...
 	$(MAKE) cleanup-kubernetes

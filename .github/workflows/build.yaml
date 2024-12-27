@@ -60,4 +60,5 @@ jobs:
           if-no-files-found: ignore
           path: |
             raw-report.json
+            build/debug-output/*.log
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 15 }}
