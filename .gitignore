@@ -2,6 +2,7 @@
 
 # ignore the compiled binary
 kuma-smoke
+*.test
 
 build
 kuma
