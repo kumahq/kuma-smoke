@@ -2,7 +2,9 @@ package kubernetes_test
 
 import (
 	"fmt"
+	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/retry"
+	"github.com/gruntwork-io/terratest/modules/testing"
 	"github.com/kumahq/kuma/test/framework/deployments/kic"
 	"github.com/pkg/errors"
 	"os"
@@ -32,6 +34,12 @@ func Install() {
 	kicName := "kic"
 
 	DescribeTableSubtree("install Kuma and run smoke scenarios", func(installMode InstallationMode, cni cniMode) {
+		BeforeAll(func() {
+			if installMode == HelmInstallationMode {
+				setupHelmRepo(cluster.GetTesting())
+			}
+		})
+
 		BeforeAll(func() {
 			err := NewClusterSetup().
 				Install(Kuma(core.Zone, createKumaDeployOptions(installMode, cni)...)).
@@ -286,4 +294,17 @@ func getServiceIP(cluster *K8sCluster, namespace, svcName string) (string, error
 	}
 
 	return ip.(string), nil
+}
+
+func setupHelmRepo(t testing.TestingT) {
+	repoName := strings.Split(Config.HelmChartName, "/")[0]
+
+	// Adding the same repo multiple times is idempotent. The
+	// `--force-update` flag prevents helm emitting an error
+	// in this case.
+	opts := helm.Options{}
+	Expect(helm.RunHelmCommandAndGetOutputE(t, &opts,
+		"repo", "add", "--force-update", repoName, Config.HelmRepoUrl)).Error().To(BeNil())
+
+	Expect(helm.RunHelmCommandAndGetOutputE(t, &opts, "repo", "update")).Error().To(BeNil())
 }
