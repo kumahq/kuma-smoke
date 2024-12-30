@@ -46,5 +46,5 @@ var _ = BeforeSuite(func() {
 })
 
 var (
-	_ = Describe("Simple", Install, Ordered)
+	_ = Describe("Single Zone", Install, Ordered)
 )
