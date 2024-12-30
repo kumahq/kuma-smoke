@@ -1,6 +1,6 @@
-helmChartName: kuma
+helmChartName: kuma/kuma
 helmRepoUrl: https://kumahq.github.io/charts
-helmChartPath: "kuma/kuma"
+helmChartPath: "."
 helmSubChartPrefix:
 imageRegistry: kumahq
 namespace: kuma-system
