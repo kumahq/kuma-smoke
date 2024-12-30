@@ -2,6 +2,9 @@ package kubernetes_test
 
 import (
 	"fmt"
+	"github.com/gruntwork-io/terratest/modules/retry"
+	"github.com/kumahq/kuma/test/framework/deployments/kic"
+	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +21,7 @@ import (
 func Install() {
 	demoApp := "demo-app"
 	demoGateway := "demo-app-gateway"
+	defaultMesh := "default"
 
 	BeforeAll(func() {
 		err := NewClusterSetup().
@@ -59,7 +63,7 @@ spec:
 		Expect(cluster.Install(YamlK8s(fmt.Sprintf(policy, Config.KumaNamespace)))).To(Succeed())
 	})
 
-	It("should deploy the demo app", func() {
+	It("should support running the demo app with builtin gateway", func() {
 		By("install the demo app and wait for it to become ready")
 		kumactl := NewKumactlOptionsE2E(cluster.GetTesting(), cluster.Name(), true)
 		demoAppYAML, err := kumactl.RunKumactlAndGetOutput("install", "demo",
@@ -76,24 +80,24 @@ spec:
 		}
 
 		By("request the demo app from the gateway pod")
-		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+		requestFromGateway(demoGateway, "", "/", func(g Gomega, out string) {
 			g.Expect(out).To(ContainSubstring("200 OK"))
 			g.Expect(out).To(ContainSubstring("server: Kuma Gateway"))
 
 			responseLog := filepath.Join(Config.DebugDir, "demo-app-wget.log")
-			Expect(os.WriteFile(responseLog, []byte(responseLog), 0o600)).To(Succeed())
+			Expect(os.WriteFile(responseLog, []byte(out), 0o600)).To(Succeed())
 		})
 	})
 
 	It("should distribute certs when mTLS is enabled", func() {
 		By("enable mTLS on the cluster")
-		Expect(cluster.Install(MTLSMeshKubernetes("default"))).To(Succeed())
+		Expect(cluster.Install(MTLSMeshKubernetes(defaultMesh))).To(Succeed())
 
 		Eventually(func(g Gomega) {
 			out, err := k8s.RunKubectlAndGetOutputE(
 				cluster.GetTesting(),
 				cluster.GetKubectlOptions(),
-				"get", "meshinsights", "default", "-ojsonpath='{.spec.mTLS.issuedBackends.ca-1.total}'",
+				"get", "meshinsights", defaultMesh, "-ojsonpath='{.spec.mTLS.issuedBackends.ca-1.total}'",
 			)
 
 			g.Expect(err).ToNot(HaveOccurred())
@@ -103,7 +107,7 @@ spec:
 		}, "60s", "1s").Should(Succeed())
 
 		By("the demo-app should not be requested without a MeshTrafficPermission applied")
-		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+		requestFromGateway(demoGateway, "", "/", func(g Gomega, out string) {
 			g.Expect(out).To(ContainSubstring("403 Forbidden"))
 		})
 
@@ -124,7 +128,86 @@ spec:
         action: Allow`
 		Expect(cluster.Install(YamlK8s(fmt.Sprintf(mtp, Config.KumaNamespace)))).To(Succeed())
 
-		requestFromGateway(demoGateway, "/", func(g Gomega, out string) {
+		By("request the demo app")
+		requestFromGateway(demoGateway, "", "/", func(g Gomega, out string) {
+			g.Expect(out).To(ContainSubstring("200 OK"))
+		})
+	})
+
+	It("should support delegated gateway", func() {
+		By("install the gateway API CRD")
+		Expect(cluster.Install(GatewayAPICRDs)).To(Succeed())
+
+		By("deploy the Kong Gateway components")
+		kicName := "kic"
+		Expect(cluster.Install(NamespaceWithSidecarInjection(kicName))).To(Succeed())
+		Expect(cluster.Install(kic.KongIngressController(
+			kic.WithNamespace(kicName),
+			kic.WithName(kicName),
+			kic.WithMesh(defaultMesh),
+		))).To(Succeed())
+		Expect(cluster.Install(kic.KongIngressService(
+			kic.WithNamespace(kicName),
+			kic.WithName(kicName),
+		))).To(Succeed())
+		kicIP, err := getServiceIP(cluster, kicName, "gateway")
+		Expect(err).ToNot(HaveOccurred())
+
+		By("install the GatewayAPI resources using Kong Gateway")
+		ingress := `
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: KIC_NAME
+  annotations:
+    konghq.com/gatewayclass-unmanaged: 'true'
+spec:
+  controllerName: konghq.com/kic-gateway-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kong
+  namespace: APP_NAMESPACE
+spec:
+  gatewayClassName: KIC_NAME
+  listeners:
+  - name: proxy
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: demo-app
+  namespace: APP_NAMESPACE
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: kong
+    namespace: APP_NAMESPACE
+  rules:
+  - backendRefs:
+    - kind: Service
+      name: demo-app
+      port: 5000
+      weight: 1
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
+`
+		ingress = strings.Replace(ingress, "KIC_NAME", kicName, -1)
+		ingress = strings.Replace(ingress, "APP_NAMESPACE", TestNamespace, -1)
+		Expect(cluster.Install(YamlK8s(ingress))).To(Succeed())
+
+		By("request the demo app via the delegated gateway")
+		requestFromGateway(demoGateway, kicIP, "/", func(g Gomega, out string) {
 			g.Expect(out).To(ContainSubstring("200 OK"))
 		})
 	})
@@ -142,21 +225,51 @@ spec:
 	})
 }
 
-func requestFromGateway(gwAppName string, requestPath string, responseChecker func(g Gomega, out string)) {
-	testingT := cluster.GetTesting()
-	kubectlOptions := cluster.GetKubectlOptions(TestNamespace)
+// requestFromGateway uses the builtin gateway pod as the client and requests an endpoint within the cluster
+func requestFromGateway(gwAppName string, requestHost, requestPath string, responseChecker func(g Gomega, out string)) {
+	// if requestHost is not provided, request the gateway instance itself
+	if requestHost == "" {
+		gatewaySvcIP, err1 := getServiceIP(cluster, TestNamespace, gwAppName)
+		Expect(err1).ToNot(HaveOccurred())
+		requestHost = gatewaySvcIP
+	}
 
-	gatewayService, err1 := k8s.GetServiceE(testingT, kubectlOptions, gwAppName)
 	gatewayPodName, err2 := PodNameOfApp(cluster, gwAppName, TestNamespace)
-	Expect(err1).ToNot(HaveOccurred())
 	Expect(err2).ToNot(HaveOccurred())
+
 	Eventually(func(g Gomega) {
 		// do not check for error, since wget return non-zero code on 403
 		stdout, stderr, _ := cluster.Exec(TestNamespace,
 			gatewayPodName,
 			"kuma-gateway",
-			"wget", "-q", "-O", "-", "-S",
-			gatewayService.Spec.ClusterIP+requestPath)
-		responseChecker(g, stdout+stderr)
+			"wget", "-q", "-O", "-", "-S", "-T", "3",
+			requestHost+requestPath)
+		responseChecker(g, stderr+stdout)
 	}, "30s", "1s").Should(Succeed())
+}
+
+func getServiceIP(cluster *K8sCluster, namespace, svcName string) (string, error) {
+	ip, err := retry.DoWithRetryInterfaceE(
+		cluster.GetTesting(),
+		fmt.Sprintf("get the clusterIP of Service %s in namespace %s", svcName, namespace),
+		60,
+		time.Second,
+		func() (interface{}, error) {
+			svc, err := k8s.GetServiceE(
+				cluster.GetTesting(),
+				cluster.GetKubectlOptions(namespace),
+				svcName,
+			)
+			if err != nil || svc.Spec.ClusterIP == "" {
+				return nil, errors.Wrapf(err, "could not get clusterIP")
+			}
+
+			return svc.Spec.ClusterIP, nil
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return ip.(string), nil
 }
