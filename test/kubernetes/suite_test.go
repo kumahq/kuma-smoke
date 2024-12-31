@@ -2,10 +2,12 @@ package kubernetes_test
 
 import (
 	"fmt"
+	"github.com/blang/semver/v4"
 	"github.com/kumahq/kuma/pkg/test"
 	. "github.com/kumahq/kuma/test/framework"
 	. "github.com/onsi/ginkgo/v2"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +16,7 @@ func TestE2E(t *testing.T) {
 }
 
 var cluster *K8sCluster
+var currentVersion, prevMinorVersion, prevPatchVersion semver.Version
 
 func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version string) []KumaDeploymentOption {
 	opts := []KumaDeploymentOption{
@@ -31,7 +34,6 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version 
 			WithHelmReleaseName(fmt.Sprintf("smoke-%s-%s", installMode, cni)),
 		)
 	} else {
-		// todo: support version?
 		opts = append(opts,
 			WithCtlOpts(map[string]string{
 				"--set": "" +
@@ -46,6 +48,23 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version 
 	}
 
 	return opts
+}
+
+func init() {
+	var err error
+	currentVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse current version: %s", Config.KumaImageTag))
+	}
+
+	prevMinorVersion, err = semver.Parse(strings.TrimPrefix(os.Getenv("SMOKE_PRODUCT_VERSION_PREV_MINOR"), "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse previous minor version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_MINOR")))
+	}
+	prevPatchVersion, err = semver.Parse(strings.TrimPrefix(os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH"), "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse previous patch version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH")))
+	}
 }
 
 var _ = BeforeSuite(func() {

@@ -92,7 +92,9 @@ spec:
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
 
 			for _, fn := range []InstallFunc{
+				WaitNumPods(TestNamespace, 1, demoApp),
 				WaitPodsAvailable(TestNamespace, demoApp),
+				WaitNumPods(TestNamespace, 1, demoGateway),
 				WaitPodsAvailable(TestNamespace, demoGateway)} {
 				Expect(fn(cluster)).To(Succeed())
 			}
