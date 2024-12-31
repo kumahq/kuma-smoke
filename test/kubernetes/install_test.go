@@ -42,7 +42,7 @@ func Install() {
 
 		BeforeAll(func() {
 			err := NewClusterSetup().
-				Install(Kuma(core.Zone, createKumaDeployOptions(installMode, cni)...)).
+				Install(Kuma(core.Zone, createKumaDeployOptions(installMode, cni, Config.KumaImageTag)...)).
 				Install(NamespaceWithSidecarInjection(TestNamespace)).
 				Setup(cluster)
 			Expect(err).ToNot(HaveOccurred())
@@ -92,7 +92,9 @@ spec:
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
 
 			for _, fn := range []InstallFunc{
+				WaitNumPods(TestNamespace, 1, demoApp),
 				WaitPodsAvailable(TestNamespace, demoApp),
+				WaitNumPods(TestNamespace, 1, demoGateway),
 				WaitPodsAvailable(TestNamespace, demoGateway)} {
 				Expect(fn(cluster)).To(Succeed())
 			}
@@ -108,7 +110,7 @@ spec:
 		})
 
 		It("should distribute certs when mTLS is enabled", func() {
-			By("enable mTLS on the cluster")
+			By("enable mTLS on the mesh")
 			Expect(cluster.Install(MTLSMeshKubernetes(defaultMesh))).To(Succeed())
 
 			Eventually(func(g Gomega) {
@@ -130,21 +132,7 @@ spec:
 			})
 
 			By("the demo-app should be requested successfully with a MeshTrafficPermission applied")
-			mtp := `
-apiVersion: kuma.io/v1alpha1
-kind: MeshTrafficPermission
-metadata:
-  name: allow-any
-  namespace: %s
-spec:
-  targetRef:
-    kind: Mesh
-  from:
-    - targetRef:
-        kind: Mesh
-      default:
-        action: Allow`
-			Expect(cluster.Install(YamlK8s(fmt.Sprintf(mtp, Config.KumaNamespace)))).To(Succeed())
+			Expect(cluster.Install(YamlK8s(meshTrafficPermission(Config.KumaNamespace)))).To(Succeed())
 
 			By("request the demo app")
 			requestFromGateway(demoGateway, "", "/", func(g Gomega, out string) {
@@ -171,7 +159,52 @@ spec:
 			Expect(err).ToNot(HaveOccurred())
 
 			By("install the GatewayAPI resources using Kong Gateway")
-			ingress := `
+			Expect(cluster.Install(YamlK8s(demoAppGatewayResources(kicName, TestNamespace)))).To(Succeed())
+
+			By("request the demo app via the delegated gateway")
+			requestFromGateway(demoGateway, kicIP, "/", func(g Gomega, out string) {
+				g.Expect(out).To(ContainSubstring("200 OK"))
+			})
+		})
+
+		It("should maintain a stable control plane", func() {
+			time.Sleep(10 * time.Second)
+
+			Expect(CpRestarted(cluster)).To(BeFalse(), cluster.Name()+" restarted in this suite, this should not happen.")
+
+			logOutputFile := filepath.Join(Config.DebugDir, fmt.Sprintf("%s-install-logs-%s-%s.log",
+				Config.KumaServiceName, installMode, cni))
+			logs, err := cluster.GetKumaCPLogs()
+
+			Expect(err).To(Not(HaveOccurred()))
+			Expect(os.WriteFile(logOutputFile, []byte(logs), 0o600)).To(Succeed())
+		})
+	},
+		Entry("kumactl, kuma-init (CNI disabled)", KumactlInstallationMode, cniDisabled),
+		Entry("helm, kuma-cni (CNI enabled)", HelmInstallationMode, cniEnabled),
+	)
+}
+
+func meshTrafficPermission(namespace string) string {
+	mtp := `
+apiVersion: kuma.io/v1alpha1
+kind: MeshTrafficPermission
+metadata:
+  name: allow-any
+  namespace: %s
+spec:
+  targetRef:
+    kind: Mesh
+  from:
+    - targetRef:
+        kind: Mesh
+      default:
+        action: Allow`
+	return fmt.Sprintf(mtp, namespace)
+}
+
+func demoAppGatewayResources(kic, appNamespace string) string {
+	ingress := `
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -219,32 +252,9 @@ spec:
         type: PathPrefix
         value: /
 `
-			ingress = strings.Replace(ingress, "KIC_NAME", kicName, -1)
-			ingress = strings.Replace(ingress, "APP_NAMESPACE", TestNamespace, -1)
-			Expect(cluster.Install(YamlK8s(ingress))).To(Succeed())
-
-			By("request the demo app via the delegated gateway")
-			requestFromGateway(demoGateway, kicIP, "/", func(g Gomega, out string) {
-				g.Expect(out).To(ContainSubstring("200 OK"))
-			})
-		})
-
-		It("should maintain a stable control plane", func() {
-			time.Sleep(10 * time.Second)
-
-			Expect(CpRestarted(cluster)).To(BeFalse(), cluster.Name()+" restarted in this suite, this should not happen.")
-
-			logOutputFile := filepath.Join(Config.DebugDir, fmt.Sprintf("%s-logs-%s-%s.log",
-				Config.KumaServiceName, installMode, cni))
-			logs, err := cluster.GetKumaCPLogs()
-
-			Expect(err).To(Not(HaveOccurred()))
-			Expect(os.WriteFile(logOutputFile, []byte(logs), 0o600)).To(Succeed())
-		})
-	},
-		Entry("kumactl, kuma-init (CNI disabled)", KumactlInstallationMode, cniDisabled),
-		Entry("helm, kuma-cni (CNI enabled)", HelmInstallationMode, cniEnabled),
-	)
+	ingress = strings.Replace(ingress, "KIC_NAME", kic, -1)
+	ingress = strings.Replace(ingress, "APP_NAMESPACE", appNamespace, -1)
+	return ingress
 }
 
 // requestFromGateway uses the builtin gateway pod as the client and requests an endpoint within the cluster
