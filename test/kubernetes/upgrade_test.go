@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/kumahq/kuma/pkg/config/core"
@@ -27,48 +26,30 @@ func Upgrade() {
 	kicName := "kic"
 	stabilizationDuration := 30 * time.Second
 
-	currentVersion, err := semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
-	Expect(err).ToNot(HaveOccurred())
-	prevMinorVersion := currentVersion
-	if prevMinorVersion.Major > 1 {
-		prevMinorVersion.Minor--
-		prevMinorVersion.Patch = 0
-	}
-	prevPatchVersion := currentVersion
-	if currentVersion.Patch > 0 {
-		prevPatchVersion.Patch--
-	}
-
 	DescribeTableSubtree("upgrade Kuma with a running workload", func(prevVersion semver.Version, installMode InstallationMode, cni cniMode) {
 		if prevVersion.String() == currentVersion.String() {
-			Skip(fmt.Sprintf("Skipping because the previous version is the same as the current version %s", currentVersion))
+			Logf("Skipping because the previous version is the same as the current version %s", currentVersion)
 			return
 		}
+		originalKumactl := Config.KumactlBin
+		originalImageTag := Config.KumaImageTag
 
 		BeforeAll(func() {
-			if installMode == HelmInstallationMode {
-				setupHelmRepo(cluster.GetTesting())
+			Logf("Testing upgrading from %s to %s", prevVersion, currentVersion)
+			versionEnvName := "KUMACTLBIN_PREV_MINOR"
+			if prevVersion.String() == prevPatchVersion.String() {
+				versionEnvName = "KUMACTLBIN_PREV_PATCH"
 			}
-		})
-
-		originalKumactl := ""
-		if cluster.GetKuma() != nil {
-			originalKumactl = cluster.GetKumactlOptions().Kumactl
-		}
-
-		BeforeAll(func() {
-			versionEnvName := "KUMACTLBIN_" + prevVersion.String()
-			versionEnvName = strings.Replace(versionEnvName, ".", "_", -1)
-			versionEnvName = strings.Replace(versionEnvName, "-", "_", -1)
-			versionEnvName = strings.ToUpper(versionEnvName)
 			prevKumactl := os.Getenv(versionEnvName)
 			if installMode == KumactlInstallationMode {
 				if prevKumactl == "" {
 					Fail(fmt.Sprintf("Please set path to version %s kumactl using envirionment variable %s", prevVersion, versionEnvName))
 					return
 				}
-
-				cluster.GetKumactlOptions().Kumactl = prevKumactl
+				Config.KumactlBin = prevKumactl
+				Config.KumaImageTag = prevVersion.String()
+			} else {
+				setupHelmRepo(cluster.GetTesting())
 			}
 
 			err := NewClusterSetup().
@@ -82,9 +63,9 @@ func Upgrade() {
 			Expect(cluster.DeleteNamespace(TestNamespace)).To(Succeed())
 			Expect(cluster.DeleteNamespace(kicName)).To(Succeed())
 			Expect(cluster.DeleteKuma()).To(Succeed())
-			if originalKumactl != "" {
-				cluster.GetKumactlOptions().Kumactl = originalKumactl
-			}
+			cluster.SetCP(nil)
+			Config.KumactlBin = originalKumactl
+			Config.KumaImageTag = originalImageTag
 		})
 
 		It("should run the demo app with mTLS and gateways", func() {
@@ -97,7 +78,9 @@ func Upgrade() {
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
 
 			for _, fn := range []InstallFunc{
+				WaitNumPods(TestNamespace, 1, demoApp),
 				WaitPodsAvailable(TestNamespace, demoApp),
+				WaitNumPods(TestNamespace, 1, demoGateway),
 				WaitPodsAvailable(TestNamespace, demoGateway)} {
 				Expect(fn(cluster)).To(Succeed())
 			}
