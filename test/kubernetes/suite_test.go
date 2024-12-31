@@ -15,7 +15,7 @@ func TestE2E(t *testing.T) {
 
 var cluster *K8sCluster
 
-func createKumaDeployOptions(installMode InstallationMode, cni cniMode) []KumaDeploymentOption {
+func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version string) []KumaDeploymentOption {
 	opts := []KumaDeploymentOption{
 		WithInstallationMode(installMode),
 	}
@@ -27,10 +27,11 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode) []KumaDe
 			WithHelmOpt("controlPlane.resources.limits.memory", "4Gi"),
 			WithHelmChartPath(Config.HelmChartName),
 			WithoutHelmOpt("global.image.tag"),
-			WithHelmChartVersion(Config.KumaImageTag),
+			WithHelmChartVersion(version),
 			WithHelmReleaseName(fmt.Sprintf("smoke-%s-%s", installMode, cni)),
 		)
 	} else {
+		// todo: support version?
 		opts = append(opts,
 			WithCtlOpts(map[string]string{
 				"--set": "" +
@@ -58,5 +59,6 @@ var _ = BeforeSuite(func() {
 })
 
 var (
-	_ = Describe("Single Zone on Kubernetes", Install, Ordered)
+	_ = Describe("Single Zone on Kubernetes - Install", Install, Ordered)
+	_ = Describe("Single Zone on Kubernetes - Upgrade", Upgrade, Ordered)
 )
