@@ -8,7 +8,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/kong/kubernetes-testing-framework v0.47.2
 	github.com/kumahq/kuma v0.0.0-20241204051139-86593067f050
-	github.com/onsi/ginkgo/v2 v2.22.1
+	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.32.0 // indirect
