@@ -2,10 +2,12 @@ package kubernetes_test
 
 import (
 	"fmt"
+	"github.com/blang/semver/v4"
 	"github.com/kumahq/kuma/pkg/test"
 	. "github.com/kumahq/kuma/test/framework"
 	. "github.com/onsi/ginkgo/v2"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -14,8 +16,9 @@ func TestE2E(t *testing.T) {
 }
 
 var cluster *K8sCluster
+var targetVersion, prevMinorVersion, prevPatchVersion semver.Version
 
-func createKumaDeployOptions(installMode InstallationMode, cni cniMode) []KumaDeploymentOption {
+func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version string) []KumaDeploymentOption {
 	opts := []KumaDeploymentOption{
 		WithInstallationMode(installMode),
 	}
@@ -27,7 +30,7 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode) []KumaDe
 			WithHelmOpt("controlPlane.resources.limits.memory", "4Gi"),
 			WithHelmChartPath(Config.HelmChartName),
 			WithoutHelmOpt("global.image.tag"),
-			WithHelmChartVersion(Config.KumaImageTag),
+			WithHelmChartVersion(version),
 			WithHelmReleaseName(fmt.Sprintf("smoke-%s-%s", installMode, cni)),
 		)
 	} else {
@@ -47,6 +50,23 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode) []KumaDe
 	return opts
 }
 
+func init() {
+	var err error
+	targetVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse test target version: %s", Config.KumaImageTag))
+	}
+
+	prevMinorVersion, err = semver.Parse(strings.TrimPrefix(os.Getenv("SMOKE_PRODUCT_VERSION_PREV_MINOR"), "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse previous minor version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_MINOR")))
+	}
+	prevPatchVersion, err = semver.Parse(strings.TrimPrefix(os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH"), "v"))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse previous patch version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH")))
+	}
+}
+
 var _ = BeforeSuite(func() {
 	kubeConfigPath := os.Getenv("KUBECONFIG")
 	if kubeConfigPath == "" {
@@ -58,5 +78,6 @@ var _ = BeforeSuite(func() {
 })
 
 var (
-	_ = Describe("Single Zone on Kubernetes", Install, Ordered)
+	_ = Describe("Single Zone on Kubernetes - Install", Install, Ordered)
+	_ = Describe("Single Zone on Kubernetes - Upgrade", Upgrade, Ordered)
 )
