@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kumahq/kuma/pkg/config/core"
@@ -73,6 +74,9 @@ func Upgrade() {
 			demoAppYAML, err := cluster.GetKumactlOptions().RunKumactlAndGetOutput("install", "demo",
 				"--namespace", TestNamespace,
 				"--system-namespace", Config.KumaNamespace)
+			demoAppYAML = strings.Replace(demoAppYAML,
+				"demo-app-gateway_kuma-demo_svc",
+				fmt.Sprintf("demo-app-gateway_%s_svc", TestNamespace), -1)
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
@@ -132,11 +136,17 @@ func Upgrade() {
 			// todo: dump all dp info & logs, etc.
 
 			By(fmt.Sprintf("upgrade the CP from %s to %s", prevVersion, currentVersion))
-			pods := cluster.GetKuma().(*K8sControlPlane).GetKumaCPPods()
-			prevVersionTemplateHash := pods[0].Labels["pod-template-hash"]
-			currentVersionTemplateHash := ""
+			prevGwPod, err := PodOfApp(cluster, demoGateway, TestNamespace)
+			Expect(err).ToNot(HaveOccurred())
+			prevGWTemplateHash := prevGwPod.Labels["pod-template-hash"]
 
-			// upgrade the CP to the current version (the target version of the testing)
+			prevCPPods := cluster.GetKuma().(*K8sControlPlane).GetKumaCPPods()
+			prevCPTemplateHash := prevCPPods[0].Labels["pod-template-hash"]
+			newCPTemplateHash := ""
+
+			// upgrade the CP to the new version (the target version of the testing)
+			Config.KumactlBin = originalKumactl
+			Config.KumaImageTag = originalImageTag
 			cluster.GetKumactlOptions().Kumactl = Config.KumactlBin
 			kumaDeployOpts := createKumaDeployOptions(installMode, cni, currentVersion.String())
 			if installMode == KumactlInstallationMode {
@@ -159,24 +169,29 @@ func Upgrade() {
 				rsList := k8s.ListReplicaSets(cluster.GetTesting(), kubectlOpts, metav1.ListOptions{LabelSelector: "app=" + Config.KumaServiceName})
 				for _, rs := range rsList {
 					if rs.Annotations["deployment.kubernetes.io/revision"] == latestRsRevision {
-						currentVersionTemplateHash = rs.Labels["pod-template-hash"]
+						newCPTemplateHash = rs.Labels["pod-template-hash"]
 						break
 					}
 				}
-				g.Expect(currentVersionTemplateHash).ToNot(BeEmpty())
+				g.Expect(newCPTemplateHash).ToNot(BeEmpty())
 			}, "30s", "2s").ShouldNot(HaveOccurred(), "failed to find the latest ReplicaSet of the CP deployment")
 
 			Eventually(func(g Gomega) {
 				cpPods, err := k8s.ListPodsE(cluster.GetTesting(), cluster.GetKubectlOptions(Config.KumaNamespace),
-					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", prevVersionTemplateHash)})
+					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", newCPTemplateHash)})
 				g.Expect(err).ToNot(HaveOccurred())
-				g.Expect(cpPods).To(HaveLen(0))
+				g.Expect(cpPods).To(HaveLen(1))
 			}, "120s", "3s").ShouldNot(HaveOccurred(), "New version of CP pods are still starting")
 			Eventually(func(g Gomega) {
 				cpPods, err := k8s.ListPodsE(cluster.GetTesting(), cluster.GetKubectlOptions(Config.KumaNamespace),
-					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", currentVersionTemplateHash)})
+					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", prevCPTemplateHash)})
 				g.Expect(err).ToNot(HaveOccurred())
-				g.Expect(cpPods).To(HaveLen(0))
+				g.Expect(cpPods).To(HaveLen(0), "Previous version CP pods")
+
+				gwPods, err := k8s.ListPodsE(cluster.GetTesting(), cluster.GetKubectlOptions(TestNamespace),
+					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", prevGWTemplateHash)})
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(gwPods).To(HaveLen(0), "Previous version GW pods")
 			}, "120s", "3s").ShouldNot(HaveOccurred(), "Previous version pods are still active")
 			Expect(cluster.GetKuma().(*K8sControlPlane).FinalizeAdd()).To(Succeed())
 
