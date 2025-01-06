@@ -28,15 +28,15 @@ func Upgrade() {
 	stabilizationDuration := 30 * time.Second
 
 	DescribeTableSubtree("upgrade Kuma with a running workload", func(prevVersion semver.Version, installMode InstallationMode, cni cniMode) {
-		if prevVersion.String() == currentVersion.String() {
-			Logf("Skipping because the previous version is the same as the current version %s", currentVersion)
+		if prevVersion.String() == targetVersion.String() {
+			Logf("Skipping because the previous version is the same as the current version %s", targetVersion)
 			return
 		}
-		originalKumactl := Config.KumactlBin
-		originalImageTag := Config.KumaImageTag
+		targetVerKumactl := Config.KumactlBin
+		targetVerImageTag := Config.KumaImageTag
 
 		BeforeAll(func() {
-			Logf("Testing upgrading from %s to %s", prevVersion, currentVersion)
+			Logf("Testing upgrading from %s to %s", prevVersion, targetVersion)
 			versionEnvName := "KUMACTLBIN_PREV_MINOR"
 			if prevVersion.String() == prevPatchVersion.String() {
 				versionEnvName = "KUMACTLBIN_PREV_PATCH"
@@ -65,8 +65,8 @@ func Upgrade() {
 			Expect(cluster.DeleteNamespace(kicName)).To(Succeed())
 			Expect(cluster.DeleteKuma()).To(Succeed())
 			cluster.SetCP(nil)
-			Config.KumactlBin = originalKumactl
-			Config.KumaImageTag = originalImageTag
+			Config.KumactlBin = targetVerKumactl
+			Config.KumaImageTag = targetVerImageTag
 		})
 
 		It("should run the demo app with mTLS and gateways", func() {
@@ -74,6 +74,8 @@ func Upgrade() {
 			demoAppYAML, err := cluster.GetKumactlOptions().RunKumactlAndGetOutput("install", "demo",
 				"--namespace", TestNamespace,
 				"--system-namespace", Config.KumaNamespace)
+			// in 2.8.x and older versions, the YAML generated from "kumactl install demo" has a bug in their MeshHTTPRoute resources
+			// causing the kuma.io/service tag fail to support changing app namespace
 			demoAppYAML = strings.Replace(demoAppYAML,
 				"demo-app-gateway_kuma-demo_svc",
 				fmt.Sprintf("demo-app-gateway_%s_svc", TestNamespace), -1)
@@ -134,22 +136,20 @@ func Upgrade() {
 			Expect(err).To(Not(HaveOccurred()))
 			Expect(os.WriteFile(prevCPLogOutputFile, []byte(log1), 0o600)).To(Succeed())
 
-			// todo: dump all dp info & logs, etc.
-
-			By(fmt.Sprintf("upgrade the CP from %s to %s", prevVersion, currentVersion))
+			By(fmt.Sprintf("upgrade the CP from %s to %s", prevVersion, targetVersion))
 			prevGwPod, err := PodOfApp(cluster, demoGateway, TestNamespace)
 			Expect(err).ToNot(HaveOccurred())
 			prevGWTemplateHash := prevGwPod.Labels["pod-template-hash"]
 
 			prevCPPods := cluster.GetKuma().(*K8sControlPlane).GetKumaCPPods()
 			prevCPTemplateHash := prevCPPods[0].Labels["pod-template-hash"]
-			newCPTemplateHash := ""
+			targetVerCPTemplateHash := ""
 
 			// upgrade the CP to the new version (the target version of the testing)
-			Config.KumactlBin = originalKumactl
-			Config.KumaImageTag = originalImageTag
+			Config.KumactlBin = targetVerKumactl
+			Config.KumaImageTag = targetVerImageTag
 			cluster.GetKumactlOptions().Kumactl = Config.KumactlBin
-			kumaDeployOpts := createKumaDeployOptions(installMode, cni, currentVersion.String())
+			kumaDeployOpts := createKumaDeployOptions(installMode, cni, targetVersion.String())
 			if installMode == KumactlInstallationMode {
 				err = NewClusterSetup().
 					Install(Kuma(core.Zone, kumaDeployOpts...)).
@@ -160,6 +160,7 @@ func Upgrade() {
 				Expect(err).ToNot(HaveOccurred())
 			}
 
+			By("waiting for the pods to be replaced by new version ones")
 			// get the latest replicaset and make sure current version instances are available and previous version ones are scaled down to 0
 			Eventually(func(g Gomega) {
 				kubectlOpts := cluster.GetKubectlOptions(Config.KumaNamespace)
@@ -170,16 +171,16 @@ func Upgrade() {
 				rsList := k8s.ListReplicaSets(cluster.GetTesting(), kubectlOpts, metav1.ListOptions{LabelSelector: "app=" + Config.KumaServiceName})
 				for _, rs := range rsList {
 					if rs.Annotations["deployment.kubernetes.io/revision"] == latestRsRevision {
-						newCPTemplateHash = rs.Labels["pod-template-hash"]
+						targetVerCPTemplateHash = rs.Labels["pod-template-hash"]
 						break
 					}
 				}
-				g.Expect(newCPTemplateHash).ToNot(BeEmpty())
+				g.Expect(targetVerCPTemplateHash).ToNot(BeEmpty())
 			}, "30s", "2s").ShouldNot(HaveOccurred(), "failed to find the latest ReplicaSet of the CP deployment")
 
 			Eventually(func(g Gomega) {
 				cpPods, err := k8s.ListPodsE(cluster.GetTesting(), cluster.GetKubectlOptions(Config.KumaNamespace),
-					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", newCPTemplateHash)})
+					metav1.ListOptions{LabelSelector: fmt.Sprintf("pod-template-hash=%s", targetVerCPTemplateHash)})
 				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(cpPods).To(HaveLen(1))
 			}, "120s", "3s").ShouldNot(HaveOccurred(), "New version of CP pods are still starting")
@@ -197,13 +198,13 @@ func Upgrade() {
 			Expect(cluster.GetKuma().(*K8sControlPlane).FinalizeAdd()).To(Succeed())
 
 			time.Sleep(stabilizationDuration)
-			Expect(CpRestarted(cluster)).To(BeFalse(), fmt.Sprintf("CP of version %s restarted, this should not happen.", currentVersion))
+			Expect(CpRestarted(cluster)).To(BeFalse(), fmt.Sprintf("CP of version %s restarted, this should not happen.", targetVersion))
 
-			currentVersionCPLogOutputFile := filepath.Join(Config.DebugDir, fmt.Sprintf("%s-upgrade-logs-v%s-%s-%s.log",
-				Config.KumaServiceName, currentVersion, installMode, cni))
+			targetVersionCPLogOutputFile := filepath.Join(Config.DebugDir, fmt.Sprintf("%s-upgrade-logs-v%s-%s-%s.log",
+				Config.KumaServiceName, targetVersion, installMode, cni))
 			log2, err := cluster.GetKumaCPLogs()
 			Expect(err).To(Not(HaveOccurred()))
-			Expect(os.WriteFile(currentVersionCPLogOutputFile, []byte(log2), 0o600)).To(Succeed())
+			Expect(os.WriteFile(targetVersionCPLogOutputFile, []byte(log2), 0o600)).To(Succeed())
 
 			By("request the demo app via gateways again")
 			requestFromGateway(demoGateway, "", "/", func(g Gomega, out string) {

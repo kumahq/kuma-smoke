@@ -16,7 +16,7 @@ func TestE2E(t *testing.T) {
 }
 
 var cluster *K8sCluster
-var currentVersion, prevMinorVersion, prevPatchVersion semver.Version
+var targetVersion, prevMinorVersion, prevPatchVersion semver.Version
 
 func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version string) []KumaDeploymentOption {
 	opts := []KumaDeploymentOption{
@@ -52,9 +52,9 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version 
 
 func init() {
 	var err error
-	currentVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
+	targetVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
 	if err != nil {
-		panic(fmt.Sprintf("Failed to parse current version: %s", Config.KumaImageTag))
+		panic(fmt.Sprintf("Failed to parse test target version: %s", Config.KumaImageTag))
 	}
 
 	prevMinorVersion, err = semver.Parse(strings.TrimPrefix(os.Getenv("SMOKE_PRODUCT_VERSION_PREV_MINOR"), "v"))
