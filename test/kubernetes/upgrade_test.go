@@ -122,6 +122,7 @@ func Upgrade() {
 				g.Expect(out).To(ContainSubstring("200 OK"))
 			})
 			dpList, err := getDataplaneList(cluster.GetKumactlOptions(), meshName)
+			Expect(err).To(Not(HaveOccurred()))
 
 			// wait for a stabilization period before checking for CP restarts
 			time.Sleep(stabilizationDuration)
@@ -214,6 +215,7 @@ func Upgrade() {
 			})
 
 			dpList2, err := getDataplaneList(cluster.GetKumactlOptions(), meshName)
+			Expect(err).To(Not(HaveOccurred()))
 			Expect(dpList).To(Equal(dpList2), "dataplane list should be the same after the upgrade")
 		})
 	},
