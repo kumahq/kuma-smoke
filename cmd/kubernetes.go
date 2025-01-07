@@ -80,7 +80,7 @@ var k8sDeployCmd = &cobra.Command{
 		if k8sDeployOpt.kubeconfigOutputFile != "" {
 			cobra.CheckErr(utils.WriteKubeconfig(envBuilder.Name, cmd, env.Cluster().Config(), k8sDeployOpt.kubeconfigOutputFile))
 		} else {
-			utils.CmdStdout(cmd, env.Name())
+			utils.CmdStdout(cmd, "%s", env.Name())
 		}
 		return nil
 	},
