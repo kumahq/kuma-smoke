@@ -29,6 +29,7 @@ func (gkeProvider) ClusterProvider(_ *cobra.Command, envName string) (clusters.B
 
 	gkeBuilder := gke.NewBuilder([]byte(gkeJsonCreds), gkeProject, gkeLocation)
 	gkeBuilder.Name = envName
+	gkeBuilder.WithNodeMachineType("e2-standard-16")
 
 	return gkeBuilder, nil
 }
