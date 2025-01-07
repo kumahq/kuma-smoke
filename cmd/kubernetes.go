@@ -86,6 +86,35 @@ var k8sDeployCmd = &cobra.Command{
 	},
 }
 
+type exportKubeconfigOptions struct {
+	envOptions
+	kubeconfigOptions
+}
+
+var k8sExportKubeConfigOpt = exportKubeconfigOptions{}
+var k8sExportKubeConfigCmd = &cobra.Command{
+	Use:   "export-kubeconfig",
+	Short: "export kubeconfig for a created cluster",
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		err := validatePlatformName(k8sExportKubeConfigOpt.envPlatform)
+		cobra.CheckErr(err)
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), utils.EnvironmentCreateTimeout)
+		defer cancel()
+
+		_, err := cluster_providers.GetBuilder(k8sExportKubeConfigOpt.envPlatform, cmd, k8sExportKubeConfigOpt.envName)
+		cobra.CheckErr(err)
+
+		existingCls, err := cluster_providers.NewClusterFromExisting(k8sExportKubeConfigOpt.envPlatform, ctx, cmd, k8sExportKubeConfigOpt.envName)
+		cobra.CheckErr(err)
+
+		cobra.CheckErr(utils.WriteKubeconfig(k8sExportKubeConfigOpt.envName, cmd, existingCls.Config(), k8sExportKubeConfigOpt.kubeconfigOutputFile))
+		return nil
+	},
+}
+
 var k8sCleanupOpt = envOptions{}
 var k8sCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
@@ -137,6 +166,15 @@ func init() {
 		fmt.Sprintf("The platform to deploy the environment on (%s)",
 			strings.Join(cluster_providers.SupportedProviderNames, ",")))
 	k8sCmd.AddCommand(k8sDeployCmd)
+
+	k8sExportKubeConfigCmd.Flags().StringVar(&k8sExportKubeConfigOpt.envName, "env", "", "name of the existing environment")
+	_ = k8sExportKubeConfigCmd.MarkFlagRequired("env")
+	k8sExportKubeConfigCmd.Flags().StringVar(&k8sExportKubeConfigOpt.envPlatform, "env-platform", "kind",
+		fmt.Sprintf("The platform that the environment was deployed on (%s)",
+			strings.Join(cluster_providers.SupportedProviderNames, ",")))
+	k8sExportKubeConfigCmd.Flags().StringVar(&k8sExportKubeConfigOpt.kubeconfigOutputFile, "kubeconfig-output", "", "The file path used to write the generated kubeconfig")
+	_ = k8sExportKubeConfigCmd.MarkFlagRequired("kubeconfig-output")
+	k8sCmd.AddCommand(k8sExportKubeConfigCmd)
 
 	k8sCleanupCmd.Flags().StringVar(&k8sCleanupOpt.envName, "env", "", "name of the existing environment")
 	_ = k8sCleanupCmd.MarkFlagRequired("env")
