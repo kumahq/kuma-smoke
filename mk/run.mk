@@ -1,3 +1,7 @@
+SMOKE_PRODUCT_NAME ?= kuma
+SMOKE_PRODUCT_VERSION ?= 2.9.2
+SMOKE_ENV_TYPE ?= kind
+
 # Extract major, minor, and patch versions
 MAJOR := $(word 1,$(subst ., ,$(SMOKE_PRODUCT_VERSION)))
 MINOR := $(word 2,$(subst ., ,$(SMOKE_PRODUCT_VERSION)))
@@ -40,7 +44,7 @@ fetch-product:
 deploy-kubernetes:
 	@[ -f $(TOP)/build/kuma-smoke ] || (echo "Please run 'make build' first" && exit 1)
 	@mkdir -p $(TOP)/build/kubernetes
-	@$(TOP)/build/kuma-smoke kubernetes deploy --env-platform kind --kubeconfig-output $(TOP)/build/kubernetes/cluster.config
+	@$(TOP)/build/kuma-smoke kubernetes deploy --env-platform $(SMOKE_ENV_TYPE) --kubeconfig-output $(TOP)/build/kubernetes/cluster.config
 
 .PHONY: cleanup-kubernetes
 cleanup-kubernetes:

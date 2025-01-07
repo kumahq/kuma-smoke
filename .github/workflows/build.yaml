@@ -34,9 +34,14 @@ jobs:
           skip-cache: true
   build-test:
     name: Build and test
+    timeout-minutes: 40
     needs:
       - check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        envPlatform: ${{ fromJSON( (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && '["kind", "gke"]' || '["kind"]' ) }}
+      fail-fast: false
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:
       - name: Checkout
@@ -51,12 +56,21 @@ jobs:
           echo "${CI_TOOLS_DIR}/bin" >> $GITHUB_PATH
       - name: make build
         run: make build
+      - name: export gke values
+        if: ${{ matrix.envPlatform == 'gke' && secrets.GOOGLE_PROJECT != '' }}
+        run: |
+          echo 'GOOGLE_PROJECT="${{ secrets.GOOGLE_PROJECT }}"  >> $GITHUB_ENV
+          echo GOOGLE_LOCATION="${{ secrets.GOOGLE_LOCATION }}"  >> $GITHUB_ENV
+          echo "GOOGLE_APPLICATION_CREDENTIALS<<EOF" >> $GITHUB_ENV
+          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}' >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
       - name: make run
-        run: make run
+        run: |
+          SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: always()
         with:
-          name: smoke-report
+          name: smoke-report-${{ matrix.envPlatform }}
           if-no-files-found: ignore
           path: |
             raw-report.json
