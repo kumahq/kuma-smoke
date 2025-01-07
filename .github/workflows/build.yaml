@@ -57,16 +57,12 @@ jobs:
           echo "${CI_TOOLS_DIR}/bin" >> $GITHUB_PATH
       - name: make build
         run: make build
-      - name: export gke values
-        if: ${{ matrix.envPlatform == 'gke' && secrets.GOOGLE_PROJECT != '' }}
-        run: |
-          echo 'GOOGLE_PROJECT="${{ secrets.GOOGLE_PROJECT }}"  >> $GITHUB_ENV
-          echo GOOGLE_LOCATION="${{ secrets.GOOGLE_LOCATION }}"  >> $GITHUB_ENV
-          echo "GOOGLE_APPLICATION_CREDENTIALS<<EOF" >> $GITHUB_ENV
-          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}' >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
       - name: make run
-        if: ${{ matrix.envPlatform != 'gke' || secrets.GOOGLE_PROJECT != '' }}
+        env:
+          GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
+          GOOGLE_LOCATION: ${{ secrets.GOOGLE_LOCATION }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+        if: ${{ matrix.envPlatform != 'gke' || env.GOOGLE_PROJECT != '' }}
         run: |
           SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
       - name: make cleanup
