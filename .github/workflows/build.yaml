@@ -65,6 +65,7 @@ jobs:
           echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}' >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
       - name: make run
+        if: ${{ matrix.envPlatform != 'gke' || secrets.GOOGLE_PROJECT != '' }}
         run: |
           SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
       - name: make cleanup
