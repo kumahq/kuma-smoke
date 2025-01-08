@@ -38,9 +38,7 @@ func Install() {
 			if installMode == HelmInstallationMode {
 				setupHelmRepo(cluster.GetTesting())
 			}
-		})
 
-		BeforeAll(func() {
 			err := NewClusterSetup().
 				Install(Kuma(core.Zone, createKumaDeployOptions(installMode, cni, Config.KumaImageTag)...)).
 				Install(NamespaceWithSidecarInjection(TestNamespace)).
