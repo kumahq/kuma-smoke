@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
 env:
   SMOKE_PRODUCT_NAME: "kuma"
   SMOKE_PRODUCT_VERSION: "2.9.2"
@@ -34,9 +35,14 @@ jobs:
           skip-cache: true
   build-test:
     name: Build and test
+    timeout-minutes: 40
     needs:
       - check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        envPlatform: ${{ fromJSON( github.event_name == 'workflow_dispatch' && '["kind", "gke"]' || '["kind"]' ) }}
+      fail-fast: false
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:
       - name: Checkout
@@ -52,11 +58,20 @@ jobs:
       - name: make build
         run: make build
       - name: make run
-        run: make run
+        env:
+          GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
+          GOOGLE_LOCATION: ${{ secrets.GOOGLE_LOCATION }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+        if: ${{ matrix.envPlatform != 'gke' || env.GOOGLE_PROJECT != '' }}
+        run: |
+          SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
+      - name: make cleanup-kubernetes
+        if: always()
+        run: make cleanup-kubernetes
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: always()
         with:
-          name: smoke-report
+          name: smoke-report-${{ matrix.envPlatform }}
           if-no-files-found: ignore
           path: |
             raw-report.json
