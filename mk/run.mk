@@ -49,7 +49,7 @@ deploy-kubernetes:
 .PHONY: cleanup-kubernetes
 cleanup-kubernetes:
 	$(eval ENV_NAME=$(shell kubectl --kubeconfig=$(TOP)/build/kubernetes/cluster.config config view -o jsonpath='{.clusters[0].name}'))
-	@if [[ "$(ENV_NAME)" != "" ]]; then \
+	@if [ "$(ENV_NAME)" != "" ]; then \
 		$(TOP)/build/kuma-smoke kubernetes cleanup --env $(ENV_NAME) --env-platform $(SMOKE_ENV_TYPE) ; \
 		rm -f $(TOP)/build/kubernetes/cluster.config; \
 	fi

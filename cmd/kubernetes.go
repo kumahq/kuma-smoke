@@ -8,6 +8,7 @@ import (
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/eks"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
 	"github.com/kumahq/kuma-smoke/pkg/utils"

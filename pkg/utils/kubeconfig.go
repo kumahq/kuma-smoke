@@ -1,48 +1,20 @@
 package utils
 
 import (
+	"github.com/kong/kubernetes-testing-framework/pkg/utils/kubernetes/generators"
 	"github.com/spf13/cobra"
 	"io"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func convertToClientCmdConfig(envName string, config *rest.Config) *clientcmdapi.Config {
-	// caller should parse env name from the output (.clusters[0].cluster.name)
-	return &clientcmdapi.Config{
-		Clusters: map[string]*clientcmdapi.Cluster{
-			envName: {
-				Server:                   config.Host,
-				CertificateAuthorityData: config.CAData,
-				TLSServerName:            config.ServerName,
-				InsecureSkipTLSVerify:    config.Insecure,
-			},
-		},
-		Contexts: map[string]*clientcmdapi.Context{
-			envName: {
-				Cluster:  envName,
-				AuthInfo: "default",
-			},
-		},
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{
-			"default": {
-				ClientKeyData:         config.KeyData,
-				ClientCertificateData: config.CertData,
-				Token:                 config.BearerToken,
-			},
-		},
-		CurrentContext: envName,
-	}
-}
-
 func writeKubeconfigToFile(envName string, config *rest.Config, filename string) error {
-	kubeconfig := convertToClientCmdConfig(envName, config)
+	kubeconfig := generators.NewClientConfigForRestConfig(envName, config)
 	return clientcmd.WriteToFile(*kubeconfig, filename)
 }
 
 func writeKubeconfigToOutput(envName string, config *rest.Config, writer io.Writer) error {
-	kubeconfig := convertToClientCmdConfig(envName, config)
+	kubeconfig := generators.NewClientConfigForRestConfig(envName, config)
 	content, err := clientcmd.Write(*kubeconfig)
 	if err != nil {
 		return err
