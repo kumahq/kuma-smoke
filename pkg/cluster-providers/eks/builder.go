@@ -9,11 +9,12 @@ import (
 	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/eks/types"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/blang/semver/v4"
 	"github.com/google/uuid"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters"
 	"github.com/pkg/errors"
+	"strings"
 	"time"
 )
 
@@ -29,16 +30,19 @@ type Builder struct {
 }
 
 const (
-	defaultNodeMachineType = "c5.2xlarge"
-	defaultNodeGroupName   = "default-node-group"
+	defaultNodeMachineType   = "c5.4xlarge"
+	defaultNodeGroupName     = "default-node-group"
+	defaultKubernetesVersion = "1.31.1"
 )
 
 // NewBuilder provides a new *Builder object.
 func NewBuilder() *Builder {
+	k8sVer := semver.MustParse(defaultKubernetesVersion)
 	return &Builder{
 		Name:            fmt.Sprintf("t-%s", uuid.NewString()),
 		nodeMachineType: defaultNodeMachineType,
 		addons:          make(clusters.Addons),
+		clusterVersion:  &k8sVer,
 	}
 }
 
@@ -76,29 +80,28 @@ func (b *Builder) Build(ctx context.Context) (clusters.Cluster, error) {
 		return nil, errors.Wrap(err, "failed to load AWS SDK config")
 	}
 
-	stsClient := sts.NewFromConfig(cfg)
 	ec2Client := ec2.NewFromConfig(cfg)
 	eksClient := eks.NewFromConfig(cfg)
+	iamClient := iam.NewFromConfig(cfg)
 
-	callerIdentity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get caller identity")
-	}
+	version := minorVersion(b.clusterVersion)
+	clusterRoleArn, nodeRoleArn, err := createRoles(ctx, iamClient, b.Name)
 
-	accountId := *callerIdentity.Account
 	_, subnetIDs, err := createVPC(ctx, ec2Client, cfg.Region)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create VPC")
 	}
 
 	clusterName := b.Name
-	clusterRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/EKSClusterRole", accountId)
-
 	eksCreateInput := &eks.CreateClusterInput{
 		Name:    &clusterName,
 		RoleArn: &clusterRoleArn,
+		Version: aws.String(version),
+
 		ResourcesVpcConfig: &types.VpcConfigRequest{
-			SubnetIds: subnetIDs,
+			EndpointPrivateAccess: aws.Bool(true),
+			EndpointPublicAccess:  aws.Bool(true),
+			SubnetIds:             subnetIDs,
 		},
 	}
 
@@ -112,13 +115,21 @@ func (b *Builder) Build(ctx context.Context) (clusters.Cluster, error) {
 		return nil, errors.Wrapf(err, "failed while waiting for EKS cluster %s to become active", clusterName)
 	}
 
-	nodeRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/EKSNodeRole", accountId)
 	err = createNodeGroup(ctx, eksClient, clusterName, nodeRoleArn, b.nodeMachineType, subnetIDs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create EKS node group for cluster %s", clusterName)
 	}
 
 	return NewFromExisting(ctx, b.Name)
+}
+
+func minorVersion(v *semver.Version) string {
+	fullStr := v.String()
+	lastIndexOfDot := strings.LastIndex(fullStr, ".")
+	if lastIndexOfDot == -1 {
+		lastIndexOfDot = 1
+	}
+	return fullStr[:lastIndexOfDot]
 }
 
 func createVPC(ctx context.Context, client *ec2.Client, region string) (string, []string, error) {
@@ -216,10 +227,11 @@ func waitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterNam
 func createNodeGroup(ctx context.Context, client *eks.Client, clusterName, nodeRoleArn, machineType string, subnetIDs []string) error {
 	nodeGroupName := defaultNodeGroupName
 	input := &eks.CreateNodegroupInput{
-		ClusterName:   &clusterName,
-		NodegroupName: &nodeGroupName,
-		NodeRole:      &nodeRoleArn,
+		ClusterName:   aws.String(clusterName),
+		NodegroupName: aws.String(nodeGroupName),
+		NodeRole:      aws.String(nodeRoleArn),
 		Subnets:       subnetIDs,
+		DiskSize:      aws.Int32(40),
 		ScalingConfig: &types.NodegroupScalingConfig{
 			MinSize:     aws.Int32(1),
 			MaxSize:     aws.Int32(1),
@@ -238,12 +250,14 @@ func createNodeGroup(ctx context.Context, client *eks.Client, clusterName, nodeR
 }
 
 func waitForNodeGroupReady(ctx context.Context, eksClient *eks.Client, clusterName, nodeGroupName string) error {
-	ticker := time.NewTicker(5 * time.Second)
+	childCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-childCtx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 			describeInput := &eks.DescribeNodegroupInput{

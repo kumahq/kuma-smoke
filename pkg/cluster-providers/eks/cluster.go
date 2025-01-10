@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	err_pkg "github.com/pkg/errors"
 	"os"
 	"os/exec"
@@ -129,7 +130,7 @@ func (c *Cluster) Cleanup(ctx context.Context) error {
 	}
 
 	vpcID := *ec2Output.Subnets[0].VpcId
-	err = deleteNodeGroup(ctx, eksClient, c.name)
+	ngRole, err := deleteNodeGroup(ctx, eksClient, c.name)
 	if err != nil {
 		return err
 	}
@@ -144,17 +145,41 @@ func (c *Cluster) Cleanup(ctx context.Context) error {
 		return err
 	}
 
+	iamClient := iam.NewFromConfig(cfg)
+	_, err = iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
+		RoleName: aws.String(ngRole),
+	})
+	if err != nil {
+		return err_pkg.Wrapf(err, "failed to delete node role %s", ngRole)
+	}
+	_, err = iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
+		RoleName: eksOutput.Cluster.RoleArn,
+	})
+	if err != nil {
+		return err_pkg.Wrapf(err, "failed to delete cluster role %s", ngRole)
+	}
+
 	return nil
 }
 
-func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) error {
+func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) (string, error) {
+	describeNGInput := &eks.DescribeNodegroupInput{
+		ClusterName:   aws.String(clusterName),
+		NodegroupName: aws.String(defaultNodeGroupName),
+	}
+	ngInfo, err := eksClient.DescribeNodegroup(ctx, describeNGInput)
+	if err != nil {
+		// todo: detect if the nodegroup is already deleted
+		return "", err_pkg.Wrapf(err, "failed to describe node group %s", defaultNodeGroupName)
+	}
+
 	nodeGroupInput := &eks.DeleteNodegroupInput{
 		ClusterName:   aws.String(clusterName),
 		NodegroupName: aws.String(defaultNodeGroupName),
 	}
-	_, err := eksClient.DeleteNodegroup(ctx, nodeGroupInput)
+	_, err = eksClient.DeleteNodegroup(ctx, nodeGroupInput)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -163,7 +188,7 @@ func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-ticker.C:
 			describeInput := &eks.DescribeNodegroupInput{
 				ClusterName:   aws.String(clusterName),
@@ -172,10 +197,12 @@ func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 			_, err := eksClient.DescribeNodegroup(ctx, describeInput)
 			if err != nil {
 				// todo: detect if the nodegroup is already deleted
-				return err_pkg.Wrapf(err, "failed to describe node group %s", defaultNodeGroupName)
+				return aws.ToString(ngInfo.Nodegroup.NodeRole),
+					err_pkg.Wrapf(err, "failed to describe node group %s", defaultNodeGroupName)
 			}
 		}
 	}
+
 }
 
 func deleteCluster(ctx context.Context, eksClient *eks.Client, clusterName string) error {
