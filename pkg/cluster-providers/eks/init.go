@@ -3,8 +3,10 @@ package eks
 import (
 	"context"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters"
+	"github.com/kris-nova/logger"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
 	"github.com/spf13/cobra"
+	"io"
 )
 
 const (
@@ -33,5 +35,7 @@ func (eksProvider) NewFromExisting(ctx context.Context, _ *cobra.Command, envNam
 }
 
 func init() {
+	// By default, we don't log anything (until KTF support a logging mechanism)
+	logger.Writer = io.Discard
 	cluster_providers.Register("eks", eksProvider{})
 }

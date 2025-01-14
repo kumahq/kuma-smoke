@@ -7,7 +7,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/pkg/errors"
 	"k8s.io/client-go/kubernetes"
@@ -15,7 +14,7 @@ import (
 )
 
 const (
-	v1Prefix        = "k8s-aws-v1."
+	v1Prefix        = "k8s-aws-v1"
 	clusterIDHeader = "x-k8s-aws-id"
 )
 
@@ -64,11 +63,8 @@ func generateBearerToken(ctx context.Context, stsClient *sts.Client, clusterID s
 	preSignURLRequest, err := preSignClient.PresignGetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}, func(presignOptions *sts.PresignOptions) {
 		presignOptions.ClientOptions = append(presignOptions.ClientOptions, func(stsOptions *sts.Options) {
 			stsOptions.APIOptions = append(stsOptions.APIOptions, smithyhttp.SetHeaderValue(clusterIDHeader, clusterID))
-			stsOptions.APIOptions = append(stsOptions.APIOptions, smithyhttp.SetHeaderValue("X-Amz-Expires", "3600"))
-			stsOptions.APIOptions = append(stsOptions.APIOptions, func(stack *middleware.Stack) error {
-				_, err := stack.Build.Remove("UserAgent")
-				return err
-			})
+			// EKS does not accept a longer validity token while STS is able to generate a token with expiry with 7 days.
+			stsOptions.APIOptions = append(stsOptions.APIOptions, smithyhttp.SetHeaderValue("X-Amz-Expires", "900"))
 		})
 	})
 	if err != nil {

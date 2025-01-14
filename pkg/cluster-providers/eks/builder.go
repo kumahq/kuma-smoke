@@ -14,6 +14,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters"
 	"github.com/pkg/errors"
+	"github.com/weaveworks/eksctl/pkg/ami"
+	"github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha5"
+	eksctlapi "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha5"
+	"github.com/weaveworks/eksctl/pkg/authconfigmap"
+	eksiam "github.com/weaveworks/eksctl/pkg/iam"
+	"github.com/weaveworks/eksctl/pkg/nodebootstrap"
+	"k8s.io/client-go/kubernetes"
+	"os"
 	"strings"
 	"time"
 )
@@ -33,6 +41,10 @@ const (
 	defaultNodeMachineType   = "c5.4xlarge"
 	defaultNodeGroupName     = "default-node-group"
 	defaultKubernetesVersion = "1.31.1"
+	defaultKubernetesSvcCIDR = "172.20.0.0/16"
+	defaultVPCCIDR           = "10.163.0.0/16"
+	envKeyNodeSSHKeyName     = "EKS_NODE_SSH_KEY"
+	kubernetesTagFormat      = "kubernetes.io/cluster/%s"
 )
 
 // NewBuilder provides a new *Builder object.
@@ -86,13 +98,25 @@ func (b *Builder) Build(ctx context.Context) (clusters.Cluster, error) {
 
 	version := minorVersion(b.clusterVersion)
 	clusterRoleArn, nodeRoleArn, err := createRoles(ctx, iamClient, b.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create IAM roles")
+	}
+	subnetAvZones, err := getAvailabilityZones(ctx, ec2Client, cfg.Region)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get availability zones in region %s", cfg.Region)
+	}
 
-	_, subnetIDs, err := createVPC(ctx, ec2Client, cfg.Region)
+	vpcId, subnetIDs, err := createVPC(ctx, ec2Client, subnetAvZones)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create VPC")
 	}
-
 	clusterName := b.Name
+
+	cpSgId, err := createControlPlaneSecurityGroup(ctx, ec2Client, vpcId, clusterName)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create control plane security group in VPC %s", vpcId)
+	}
+
 	eksCreateInput := &eks.CreateClusterInput{
 		Name:    &clusterName,
 		RoleArn: &clusterRoleArn,
@@ -102,6 +126,7 @@ func (b *Builder) Build(ctx context.Context) (clusters.Cluster, error) {
 			EndpointPrivateAccess: aws.Bool(true),
 			EndpointPublicAccess:  aws.Bool(true),
 			SubnetIds:             subnetIDs,
+			SecurityGroupIds:      []string{cpSgId},
 		},
 	}
 
@@ -110,17 +135,49 @@ func (b *Builder) Build(ctx context.Context) (clusters.Cluster, error) {
 		return nil, errors.Wrapf(err, "failed to create EKS cluster %s", clusterName)
 	}
 
-	err = waitForClusterActive(ctx, eksClient, clusterName)
+	activeCluster, err := waitForClusterActive(ctx, eksClient, clusterName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed while waiting for EKS cluster %s to become active", clusterName)
 	}
 
-	err = createNodeGroup(ctx, eksClient, clusterName, nodeRoleArn, b.nodeMachineType, subnetIDs)
+	sgId, err := createNodeSecurityGroup(ctx, ec2Client, vpcId, clusterName, activeCluster.ResourcesVpcConfig.SecurityGroupIds)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create security groups")
+	}
+
+	clsObject, err := NewFromExisting(ctx, b.Name)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get cluster client for cluster %s", clusterName)
+	}
+
+	err = authorizeNodeGroup(clsObject.Client(), nodeRoleArn)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to authorize node group to access cluster %s", clusterName)
+	}
+
+	amiId, err := resolveAMI(ctx, ec2Client, cfg.Region, minorVersion(b.clusterVersion), b.nodeMachineType, v1alpha5.DefaultNodeImageFamily)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to resolve AMI")
+	}
+
+	clusterCfg := b.buildClusterConfig(cfg.Region, amiId, subnetAvZones)
+	ng := clusterCfg.NodeGroups[0]
+	clusterCfg.VPC.ID = vpcId
+	ng.Subnets = subnetIDs
+	ng.SecurityGroups.AttachIDs = []string{sgId}
+	ng.IAM.InstanceRoleARN = nodeRoleArn
+
+	err = clusterCfg.SetClusterState(activeCluster)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create cluster state object for cluster %s", clusterName)
+	}
+
+	err = createNodeGroup(ctx, eksClient, ec2Client, clusterCfg)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create EKS node group for cluster %s", clusterName)
 	}
 
-	return NewFromExisting(ctx, b.Name)
+	return clsObject, nil
 }
 
 func minorVersion(v *semver.Version) string {
@@ -132,16 +189,64 @@ func minorVersion(v *semver.Version) string {
 	return fullStr[:lastIndexOfDot]
 }
 
-func createVPC(ctx context.Context, client *ec2.Client, region string) (string, []string, error) {
-	vpcOutput, err := client.CreateVpc(ctx, &ec2.CreateVpcInput{
-		CidrBlock: aws.String("10.0.0.0/16"),
+func (b *Builder) buildClusterConfig(region, amiId string, subnetAvZones []string) *eksctlapi.ClusterConfig {
+	clusterCfg := eksctlapi.NewClusterConfig()
+
+	clusterCfg.Metadata.Name = b.Name
+	clusterCfg.Metadata.Region = region
+	clusterCfg.Metadata.Version = minorVersion(b.clusterVersion)
+	clusterCfg.KubernetesNetworkConfig.ServiceIPv4CIDR = defaultKubernetesSvcCIDR
+	clusterCfg.Status = &eksctlapi.ClusterStatus{}
+
+	ng := clusterCfg.NewNodeGroup()
+	ng.Name = defaultNodeGroupName
+	ng.ContainerRuntime = aws.String(eksctlapi.ContainerRuntimeContainerD)
+	ng.AMIFamily = v1alpha5.DefaultNodeImageFamily
+	ng.AMI = amiId
+	ng.InstanceType = b.nodeMachineType
+	ng.AvailabilityZones = subnetAvZones
+	ng.ScalingConfig = &v1alpha5.ScalingConfig{
+		DesiredCapacity: aws.Int(1),
+		MinSize:         aws.Int(1),
+		MaxSize:         aws.Int(1),
+	}
+
+	nodeKeyName := os.Getenv(envKeyNodeSSHKeyName)
+	if nodeKeyName != "" {
+		ng.SSH.Allow = aws.Bool(true)
+		ng.SSH.PublicKeyName = aws.String(nodeKeyName)
+	}
+
+	return clusterCfg
+}
+
+func getAvailabilityZones(ctx context.Context, ec2Client *ec2.Client, region string) ([]string, error) {
+	availabilityZonesOutput, err := ec2Client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to describe availability zones")
+	}
+	var subnetAvZones []string
+	for _, az := range availabilityZonesOutput.AvailabilityZones {
+		if az.State == ec2Types.AvailabilityZoneStateAvailable && len(subnetAvZones) < 2 {
+			subnetAvZones = append(subnetAvZones, *az.ZoneName)
+		}
+	}
+	if len(subnetAvZones) < 2 {
+		return nil, errors.Wrapf(err, "there is no sufficient availability zones available in region %s", region)
+	}
+	return subnetAvZones, nil
+}
+
+func createVPC(ctx context.Context, ec2Client *ec2.Client, subnetAvZones []string) (string, []string, error) {
+	vpcOutput, err := ec2Client.CreateVpc(ctx, &ec2.CreateVpcInput{
+		CidrBlock: aws.String(defaultVPCCIDR),
 	})
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to create VPC")
 	}
 
 	vpcID := *vpcOutput.Vpc.VpcId
-	_, err = client.ModifyVpcAttribute(context.TODO(), &ec2.ModifyVpcAttributeInput{
+	_, err = ec2Client.ModifyVpcAttribute(context.TODO(), &ec2.ModifyVpcAttributeInput{
 		VpcId: aws.String(vpcID),
 		EnableDnsSupport: &ec2Types.AttributeBooleanValue{
 			Value: aws.Bool(true),
@@ -150,7 +255,7 @@ func createVPC(ctx context.Context, client *ec2.Client, region string) (string, 
 	if err != nil {
 		return "", nil, errors.Wrapf(err, "failed to enable DNS support for VPC %s", vpcID)
 	}
-	_, err = client.ModifyVpcAttribute(context.TODO(), &ec2.ModifyVpcAttributeInput{
+	_, err = ec2Client.ModifyVpcAttribute(context.TODO(), &ec2.ModifyVpcAttributeInput{
 		VpcId: aws.String(vpcID),
 		EnableDnsHostnames: &ec2Types.AttributeBooleanValue{
 			Value: aws.Bool(true),
@@ -160,93 +265,266 @@ func createVPC(ctx context.Context, client *ec2.Client, region string) (string, 
 		return "", nil, errors.Wrapf(err, "failed to enable DNS support for VPC %s", vpcID)
 	}
 
-	availabilityZonesOutput, err := client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{})
+	igwOutput, err := ec2Client.CreateInternetGateway(ctx, &ec2.CreateInternetGatewayInput{})
 	if err != nil {
-		return "", nil, errors.Wrap(err, "failed to describe availability zones")
+		return "", nil, errors.Wrap(err, "unable to create Internet Gateway")
 	}
-	var subnetAvZones []string
-	for _, az := range availabilityZonesOutput.AvailabilityZones {
-		if az.State == ec2Types.AvailabilityZoneStateAvailable && len(subnetAvZones) < 2 {
-			subnetAvZones = append(subnetAvZones, *az.ZoneName)
-		}
+	_, err = ec2Client.AttachInternetGateway(ctx, &ec2.AttachInternetGatewayInput{
+		InternetGatewayId: igwOutput.InternetGateway.InternetGatewayId,
+		VpcId:             vpcOutput.Vpc.VpcId,
+	})
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "unable to add Internet Gateway %s within the VPC %s", *igwOutput.InternetGateway.InternetGatewayId, vpcID)
 	}
-	if len(subnetAvZones) < 2 {
-		return "", nil, errors.Wrapf(err, "there is no sufficient availability zones available in region %s", region)
+	rtOutput, err := ec2Client.CreateRouteTable(ctx, &ec2.CreateRouteTableInput{
+		VpcId: vpcOutput.Vpc.VpcId,
+	})
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to create Route Table")
+	}
+	_, err = ec2Client.CreateRoute(ctx, &ec2.CreateRouteInput{
+		RouteTableId:         rtOutput.RouteTable.RouteTableId,
+		GatewayId:            igwOutput.InternetGateway.InternetGatewayId,
+		DestinationCidrBlock: aws.String("0.0.0.0/0"),
+	})
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to create default egress route for Route Table %s",
+			*rtOutput.RouteTable.RouteTableId)
 	}
 
-	subnet1Output, err := client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
-		VpcId:            aws.String(vpcID),
-		CidrBlock:        aws.String("10.0.1.0/24"),
-		AvailabilityZone: aws.String(subnetAvZones[0]),
-	})
+	subnetId1, err := createSubnet(ctx, ec2Client, vpcID, "10.0.1.0/24", subnetAvZones[0], *rtOutput.RouteTable.RouteTableId)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to create subnet within the VPC %s", vpcID)
+	}
+	subnetId2, err := createSubnet(ctx, ec2Client, vpcID, "10.0.2.0/24", subnetAvZones[1], *rtOutput.RouteTable.RouteTableId)
 	if err != nil {
 		return "", nil, errors.Wrapf(err, "failed to create subnet within the VPC %s", vpcID)
 	}
 
-	subnet2Output, err := client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
-		VpcId:            aws.String(vpcID),
-		CidrBlock:        aws.String("10.0.2.0/24"),
-		AvailabilityZone: aws.String(subnetAvZones[1]),
-	})
-	if err != nil {
-		return "", nil, errors.Wrapf(err, "failed to create subnet within the VPC %s", vpcID)
-	}
-
-	subnetIDs := []string{
-		*subnet1Output.Subnet.SubnetId,
-		*subnet2Output.Subnet.SubnetId,
-	}
+	subnetIDs := []string{subnetId1, subnetId2}
 	return vpcID, subnetIDs, nil
 }
 
-func waitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterName string) error {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+func createSubnet(ctx context.Context, ec2Client *ec2.Client, vpcID, cidrBlock, availabilityZone, routeTableId string) (string, error) {
+	subnet1Output, err := ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
+		VpcId:            aws.String(vpcID),
+		CidrBlock:        aws.String(cidrBlock),
+		AvailabilityZone: aws.String(availabilityZone),
+	})
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to create subnet within the VPC %s", vpcID)
+	}
 
+	subnetId := subnet1Output.Subnet.SubnetId
+	_, err = ec2Client.ModifySubnetAttribute(ctx, &ec2.ModifySubnetAttributeInput{
+		SubnetId:            subnetId,
+		MapPublicIpOnLaunch: &ec2Types.AttributeBooleanValue{Value: aws.Bool(true)},
+	})
+	if err != nil {
+		return "", errors.Wrapf(err, "unable to modify subnet %s to enable public IP assignment", *subnetId)
+	}
+
+	if routeTableId != "" {
+		_, err = ec2Client.AssociateRouteTable(ctx, &ec2.AssociateRouteTableInput{
+			RouteTableId: aws.String(routeTableId),
+			SubnetId:     subnetId,
+		})
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to associate Route Table %s with subnet %s", routeTableId, *subnetId)
+		}
+	}
+	return *subnetId, nil
+}
+
+func createControlPlaneSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, namePrefix string) (string, error) {
+	sg1Output, err := ec2Client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String(fmt.Sprintf("%s-cp", namePrefix)),
+		Description: aws.String("Allow communication between the control plane and worker nodes"),
+		VpcId:       aws.String(vpcId),
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create security group")
+	}
+	return *sg1Output.GroupId, nil
+}
+
+func createNodeSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, namePrefix string, cpDefaultSecurityGroupIds []string) (string, error) {
+	sgOutput, err := ec2Client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String(fmt.Sprintf("%s-shared-by-all-nodes", namePrefix)),
+		Description: aws.String("All communication between all nodes in the cluster"),
+		VpcId:       aws.String(vpcId),
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create node security group")
+	}
+
+	for _, sgId := range cpDefaultSecurityGroupIds {
+		_, err = ec2Client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+			GroupId: sgOutput.GroupId,
+			IpPermissions: []ec2Types.IpPermission{
+				{
+					IpProtocol: aws.String("-1"),
+					UserIdGroupPairs: []ec2Types.UserIdGroupPair{
+						{
+							GroupId: aws.String(sgId),
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to authorize inbound traffic from control plane security group %s to node security group %s",
+				sgId, *sgOutput.GroupId)
+		}
+
+		_, err = ec2Client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+			GroupId: aws.String(sgId),
+			IpPermissions: []ec2Types.IpPermission{
+				{
+					IpProtocol: aws.String("-1"),
+					UserIdGroupPairs: []ec2Types.UserIdGroupPair{
+						{
+							GroupId: sgOutput.GroupId,
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to authorize inbound traffic from node security group %s to control plane security group %s",
+				*sgOutput.GroupId, sgId)
+		}
+	}
+
+	return *sgOutput.GroupId, nil
+}
+
+func authorizeNodeGroup(clientSet kubernetes.Interface, nodeRoleArn string) error {
+	acm, err := authconfigmap.NewFromClientSet(clientSet)
+	if err != nil {
+		return err
+	}
+
+	nodeGroupRoles := authconfigmap.RoleNodeGroupGroups
+
+	identity, err := eksiam.NewIdentity(nodeRoleArn, authconfigmap.RoleNodeGroupUsername, nodeGroupRoles)
+	if err != nil {
+		return err
+	}
+
+	if err := acm.AddIdentity(identity); err != nil {
+		return errors.Wrap(err, "adding nodegroup to auth ConfigMap")
+	}
+	if err := acm.Save(); err != nil {
+		return errors.Wrap(err, "saving auth ConfigMap")
+	}
+	return nil
+}
+
+func waitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterName string) (*types.Cluster, error) {
+	childCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-childCtx.Done():
+			return nil, childCtx.Err()
 		case <-ticker.C:
 			describeInput := &eks.DescribeClusterInput{
 				Name: &clusterName,
 			}
 			resp, err := eksClient.DescribeCluster(ctx, describeInput)
 			if err != nil {
-				return errors.Wrap(err, fmt.Sprintf("failed to describe EKS cluster %s", clusterName))
+				return nil, errors.Wrap(err, fmt.Sprintf("failed to describe EKS cluster %s", clusterName))
 			}
 
 			status := resp.Cluster.Status
 			if status == types.ClusterStatusActive {
-				return nil
+				return resp.Cluster, nil
 			}
 		}
 	}
 }
 
-func createNodeGroup(ctx context.Context, client *eks.Client, clusterName, nodeRoleArn, machineType string, subnetIDs []string) error {
-	nodeGroupName := defaultNodeGroupName
-	input := &eks.CreateNodegroupInput{
-		ClusterName:   aws.String(clusterName),
-		NodegroupName: aws.String(nodeGroupName),
-		NodeRole:      aws.String(nodeRoleArn),
-		Subnets:       subnetIDs,
-		DiskSize:      aws.Int32(40),
-		ScalingConfig: &types.NodegroupScalingConfig{
-			MinSize:     aws.Int32(1),
-			MaxSize:     aws.Int32(1),
-			DesiredSize: aws.Int32(1),
-		},
-		AmiType:       types.AMITypesAl2X8664,
-		InstanceTypes: []string{machineType},
+func createNodeGroup(ctx context.Context, eksClient *eks.Client, ec2Client *ec2.Client, clusterCfg *eksctlapi.ClusterConfig) error {
+	nodeGroup := clusterCfg.NodeGroups[0]
+	launchTemplateId, err := createNodeLaunchTemplate(ctx, ec2Client, clusterCfg)
+	if err != nil {
+		return errors.Wrap(err, "failed to create launch template")
 	}
 
-	_, err := client.CreateNodegroup(ctx, input)
+	input := &eks.CreateNodegroupInput{
+		ClusterName:   aws.String(clusterCfg.Metadata.Name),
+		NodegroupName: aws.String(nodeGroup.Name),
+		NodeRole:      aws.String(nodeGroup.IAM.InstanceRoleARN),
+		Subnets:       nodeGroup.Subnets,
+		ScalingConfig: &types.NodegroupScalingConfig{
+			MinSize:     aws.Int32(int32(aws.ToInt(nodeGroup.MinSize))),
+			MaxSize:     aws.Int32(int32(aws.ToInt(nodeGroup.MaxSize))),
+			DesiredSize: aws.Int32(int32(aws.ToInt(nodeGroup.DesiredCapacity))),
+		},
+		LaunchTemplate: &types.LaunchTemplateSpecification{
+			Id: aws.String(launchTemplateId),
+		},
+	}
+
+	_, err = eksClient.CreateNodegroup(ctx, input)
 	if err != nil {
 		return err
 	}
 
-	return waitForNodeGroupReady(ctx, client, clusterName, nodeGroupName)
+	return waitForNodeGroupReady(ctx, eksClient, clusterCfg.Metadata.Name, nodeGroup.Name)
+}
+
+func createNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, clusterCfg *eksctlapi.ClusterConfig) (string, error) {
+	nodeGroup := clusterCfg.NodeGroups[0]
+	bootstrap := nodebootstrap.NewAL2Bootstrapper(clusterCfg, nodeGroup, nodeGroup.ClusterDNS)
+	userdata, err := bootstrap.UserData()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate instance bootstrap user data")
+	}
+
+	input := &ec2.CreateLaunchTemplateInput{
+		LaunchTemplateName: aws.String(fmt.Sprintf("%s-node-template", clusterCfg.Metadata.Name)),
+		LaunchTemplateData: &ec2Types.RequestLaunchTemplateData{
+			ImageId:          aws.String(nodeGroup.AMI),
+			InstanceType:     ec2Types.InstanceType(nodeGroup.InstanceType),
+			SecurityGroupIds: nodeGroup.SecurityGroups.AttachIDs,
+			BlockDeviceMappings: []ec2Types.LaunchTemplateBlockDeviceMappingRequest{
+				{
+					DeviceName: aws.String("/dev/xvda"),
+					Ebs: &ec2Types.LaunchTemplateEbsBlockDeviceRequest{
+						VolumeSize: aws.Int32(int32(aws.ToInt(nodeGroup.VolumeSize))),
+						VolumeType: ec2Types.VolumeType(aws.ToString(nodeGroup.VolumeType)),
+					},
+				},
+			},
+			UserData: aws.String(userdata),
+			TagSpecifications: []ec2Types.LaunchTemplateTagSpecificationRequest{
+				{
+					ResourceType: ec2Types.ResourceTypeInstance,
+					Tags: []ec2Types.Tag{
+						{
+							Key:   aws.String(fmt.Sprintf(kubernetesTagFormat, clusterCfg.Metadata.Name)),
+							Value: aws.String("owned"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if nodeGroup.SSH.PublicKeyName != nil {
+		input.LaunchTemplateData.KeyName = nodeGroup.SSH.PublicKeyName
+	}
+
+	output, err := ec2Client.CreateLaunchTemplate(ctx, input)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create launch template")
+	}
+
+	return *output.LaunchTemplate.LaunchTemplateId, nil
 }
 
 func waitForNodeGroupReady(ctx context.Context, eksClient *eks.Client, clusterName, nodeGroupName string) error {
@@ -258,7 +536,7 @@ func waitForNodeGroupReady(ctx context.Context, eksClient *eks.Client, clusterNa
 	for {
 		select {
 		case <-childCtx.Done():
-			return ctx.Err()
+			return childCtx.Err()
 		case <-ticker.C:
 			describeInput := &eks.DescribeNodegroupInput{
 				ClusterName:   &clusterName,
@@ -275,4 +553,14 @@ func waitForNodeGroupReady(ctx context.Context, eksClient *eks.Client, clusterNa
 			}
 		}
 	}
+}
+
+func resolveAMI(ctx context.Context, ec2Client *ec2.Client, region, k8sMajorVersion, instanceType, amiFamily string) (string, error) {
+	resolver := ami.NewAutoResolver(ec2Client)
+
+	id, err := resolver.Resolve(ctx, region, k8sMajorVersion, instanceType, amiFamily)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to determine AMI to use")
+	}
+	return id, nil
 }

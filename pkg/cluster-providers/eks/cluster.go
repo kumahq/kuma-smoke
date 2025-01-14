@@ -55,6 +55,9 @@ func NewFromExisting(ctx context.Context, name string) (*Cluster, error) {
 	}
 
 	restCfg, kubeCfg, err := clientForCluster(ctx, cfg, name)
+	if err != nil {
+		return nil, err_pkg.Wrapf(err, "failed to get kube client for cluster %s", name)
+	}
 	return &Cluster{
 		name:   name,
 		client: kubeCfg,
@@ -113,24 +116,28 @@ func (c *Cluster) Cleanup(ctx context.Context) error {
 
 	eksClient := eks.NewFromConfig(cfg)
 	ec2Client := ec2.NewFromConfig(cfg)
+	iamClient := iam.NewFromConfig(cfg)
 
-	eksOutput, err := eksClient.DescribeCluster(context.TODO(), &eks.DescribeClusterInput{
+	activeCluster, err := eksClient.DescribeCluster(context.TODO(), &eks.DescribeClusterInput{
 		Name: aws.String(c.name),
 	})
 	if err != nil {
 		return err_pkg.Wrap(err, "failed to read cluster information")
 	}
 
-	subnetIDs := eksOutput.Cluster.ResourcesVpcConfig.SubnetIds
-	ec2Output, err := ec2Client.DescribeSubnets(context.TODO(), &ec2.DescribeSubnetsInput{
-		SubnetIds: subnetIDs,
-	})
+	vpcID := activeCluster.Cluster.ResourcesVpcConfig.VpcId
+	ngRole, launchTemplateId, err := deleteNodeGroup(ctx, eksClient, c.name)
 	if err != nil {
-		return err_pkg.Wrap(err, "failed to read information of subnets on cluster")
+		return err
+	}
+	if launchTemplateId != "" {
+		err = deleteNodeLaunchTemplate(ctx, ec2Client, launchTemplateId)
+		if err != nil {
+			return err
+		}
 	}
 
-	vpcID := *ec2Output.Subnets[0].VpcId
-	ngRole, err := deleteNodeGroup(ctx, eksClient, c.name)
+	err = deleteRoles(ctx, iamClient, []string{ngRole, *activeCluster.Cluster.RoleArn})
 	if err != nil {
 		return err
 	}
@@ -140,37 +147,28 @@ func (c *Cluster) Cleanup(ctx context.Context) error {
 		return err
 	}
 
-	err = deleteVPC(ctx, ec2Client, vpcID)
+	err = deleteVPC(ctx, ec2Client, *vpcID)
 	if err != nil {
 		return err
-	}
-
-	iamClient := iam.NewFromConfig(cfg)
-	_, err = iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
-		RoleName: aws.String(ngRole),
-	})
-	if err != nil {
-		return err_pkg.Wrapf(err, "failed to delete node role %s", ngRole)
-	}
-	_, err = iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
-		RoleName: eksOutput.Cluster.RoleArn,
-	})
-	if err != nil {
-		return err_pkg.Wrapf(err, "failed to delete cluster role %s", ngRole)
 	}
 
 	return nil
 }
 
-func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) (string, error) {
+func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) (string, string, error) {
+	var notFoundErr *types.ResourceNotFoundException
 	describeNGInput := &eks.DescribeNodegroupInput{
 		ClusterName:   aws.String(clusterName),
 		NodegroupName: aws.String(defaultNodeGroupName),
 	}
 	ngInfo, err := eksClient.DescribeNodegroup(ctx, describeNGInput)
 	if err != nil {
-		// todo: detect if the nodegroup is already deleted
-		return "", err_pkg.Wrapf(err, "failed to describe node group %s", defaultNodeGroupName)
+		if errors.As(err, &notFoundErr) {
+			// the node group had already been deleted
+			return "", "", nil
+		} else {
+			return "", "", err_pkg.Wrapf(err, "failed to describe node group %s of cluster %s", defaultNodeGroupName, clusterName)
+		}
 	}
 
 	nodeGroupInput := &eks.DeleteNodegroupInput{
@@ -179,7 +177,7 @@ func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 	}
 	_, err = eksClient.DeleteNodegroup(ctx, nodeGroupInput)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -188,7 +186,7 @@ func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", "", ctx.Err()
 		case <-ticker.C:
 			describeInput := &eks.DescribeNodegroupInput{
 				ClusterName:   aws.String(clusterName),
@@ -196,16 +194,30 @@ func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 			}
 			_, err := eksClient.DescribeNodegroup(ctx, describeInput)
 			if err != nil {
-				// todo: detect if the nodegroup is already deleted
-				return aws.ToString(ngInfo.Nodegroup.NodeRole),
-					err_pkg.Wrapf(err, "failed to describe node group %s", defaultNodeGroupName)
+				if errors.As(err, &notFoundErr) {
+					// the node group has already been deleted successfully
+					return aws.ToString(ngInfo.Nodegroup.NodeRole), aws.ToString(ngInfo.Nodegroup.LaunchTemplate.Id), nil
+				} else {
+					return "", "", err_pkg.Wrap(err, fmt.Sprintf("failed to describe node group %s of cluster %s", defaultNodeGroupName, clusterName))
+				}
 			}
 		}
 	}
+}
 
+func deleteNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, launchTemplateId string) error {
+	deleteLaunchTmplInput := &ec2.DeleteLaunchTemplateInput{
+		LaunchTemplateId: aws.String(launchTemplateId),
+	}
+	_, err := ec2Client.DeleteLaunchTemplate(ctx, deleteLaunchTmplInput)
+	if err != nil {
+		return err_pkg.Wrapf(err, "failed to delete node launch template %s", launchTemplateId)
+	}
+	return nil
 }
 
 func deleteCluster(ctx context.Context, eksClient *eks.Client, clusterName string) error {
+	var notFoundErr *types.ResourceNotFoundException
 	clusterInput := &eks.DeleteClusterInput{
 		Name: aws.String(clusterName),
 	}
@@ -225,15 +237,15 @@ func deleteCluster(ctx context.Context, eksClient *eks.Client, clusterName strin
 			describeInput := &eks.DescribeClusterInput{
 				Name: aws.String(clusterName),
 			}
-			resp, err := eksClient.DescribeCluster(ctx, describeInput)
+			_, err := eksClient.DescribeCluster(ctx, describeInput)
 			if err != nil {
-				// todo: detect if cluster is already deleted
-				return err_pkg.Wrap(err, fmt.Sprintf("failed to describe EKS cluster %s", clusterName))
-			}
-
-			status := resp.Cluster.Status
-			if status == types.ClusterStatusFailed {
-				return nil
+				if errors.As(err, &notFoundErr) {
+					// the cluster has already been deleted successfully
+					return nil
+				} else {
+					// todo: detect if cluster is already deleted
+					return err_pkg.Wrap(err, fmt.Sprintf("failed to describe EKS cluster %s", clusterName))
+				}
 			}
 		}
 	}
