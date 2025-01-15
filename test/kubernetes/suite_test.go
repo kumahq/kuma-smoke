@@ -1,22 +1,36 @@
 package kubernetes_test
 
 import (
+	"context"
 	"fmt"
 	"github.com/blang/semver/v4"
+	cluster_providers "github.com/kumahq/kuma-smoke/pkg/cluster-providers"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
+	"github.com/kumahq/kuma-smoke/pkg/utils"
 	"github.com/kumahq/kuma/pkg/test"
 	. "github.com/kumahq/kuma/test/framework"
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/spf13/cobra"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestE2E(t *testing.T) {
 	test.RunE2ESpecs(t, "Kuma Smoke Suite - Kubernetes")
 }
 
+var (
+	_ = Describe("Single Zone on Kubernetes - Install", Install, Ordered)
+	_ = Describe("Single Zone on Kubernetes - Upgrade", Upgrade, Ordered)
+)
+
 var cluster *K8sCluster
 var targetVersion, prevMinorVersion, prevPatchVersion semver.Version
+var kubeconfigPath string
+var kubeConfigExportChannel chan struct{}
 
 func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version string) []KumaDeploymentOption {
 	opts := []KumaDeploymentOption{
@@ -50,7 +64,37 @@ func createKumaDeployOptions(installMode InstallationMode, cni cniMode, version 
 	return opts
 }
 
-func init() {
+func exportKubeConfig(envType string, envName string, exportPath string) {
+	ctx, cancel := context.WithTimeout(context.Background(), utils.EnvironmentCreateTimeout)
+	defer cancel()
+
+	var dummyCmd *cobra.Command
+	existingCls, err := cluster_providers.NewClusterFromExisting(envType, ctx, dummyCmd, envName)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to get existing %s cluster %s: %v", envType, envName, err))
+	}
+
+	err = utils.WriteKubeconfig(envName, dummyCmd, existingCls.Config(), exportPath)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to export kubeconfig for existing %s cluster %s: %v", envType, envName, err))
+	}
+}
+
+func exportKubeConfigPeriodically(envType string, envName string, exportPath string) {
+	kubeConfigExportChannel = make(chan struct{})
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-kubeConfigExportChannel:
+			return
+		case <-ticker.C:
+			exportKubeConfig(envType, envName, exportPath)
+		}
+	}
+}
+
+var _ = SynchronizedBeforeSuite(func() {
 	var err error
 	targetVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
 	if err != nil {
@@ -65,19 +109,28 @@ func init() {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to parse previous patch version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH")))
 	}
-}
 
-var _ = BeforeSuite(func() {
-	kubeConfigPath := os.Getenv("KUBECONFIG")
-	if kubeConfigPath == "" {
-		kubeConfigPath = "${HOME}/.kube/config"
+	file, err := os.CreateTemp("", "kuma-smoke")
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create temp file: %s", err))
+	}
+	_ = file.Close()
+	kubeconfigPath = file.Name()
+	cluster = NewK8sCluster(NewTestingT(), "kuma-smoke", true)
+	cluster.WithKubeConfig(kubeconfigPath)
+	fmt.Printf("using kubeconfig: %s\n", kubeconfigPath)
+
+	envType := os.Getenv("SMOKE_ENV_TYPE")
+	envName := os.Getenv("SMOKE_ENV_NAME")
+	if envType == "" || envName == "" {
+		panic("SMOKE_ENV_TYPE and SMOKE_ENV_NAME must be set to provide a running Kubernetes cluster")
 	}
 
-	cluster = NewK8sCluster(NewTestingT(), "kuma-smoke", true)
-	cluster.WithKubeConfig(os.ExpandEnv(kubeConfigPath))
-})
+	exportKubeConfig(envType, envName, kubeconfigPath)
+	go exportKubeConfigPeriodically(envType, envName, kubeconfigPath)
+}, func() {})
 
-var (
-	_ = Describe("Single Zone on Kubernetes - Install", Install, Ordered)
-	_ = Describe("Single Zone on Kubernetes - Upgrade", Upgrade, Ordered)
-)
+var _ = SynchronizedAfterSuite(func() {}, func() {
+	close(kubeConfigExportChannel)
+	_ = os.Remove(kubeconfigPath)
+})
