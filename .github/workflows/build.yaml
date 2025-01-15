@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        envPlatform: ${{ fromJSON( github.event_name == 'workflow_dispatch' && '["kind", "gke"]' || '["kind"]' ) }}
+        envPlatform: ${{ fromJSON( github.event_name == 'workflow_dispatch' && '["kind", "gke", "eks"]' || '["kind"]' ) }}
       fail-fast: false
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:
@@ -62,7 +62,11 @@ jobs:
           GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
           GOOGLE_LOCATION: ${{ secrets.GOOGLE_LOCATION }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-        if: ${{ matrix.envPlatform != 'gke' || env.GOOGLE_PROJECT != '' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        if: ${{ matrix.envPlatform == 'kind' || (matrix.envPlatform == 'gke' && env.GOOGLE_PROJECT != '') || (matrix.envPlatform == 'eks' && env.AWS_ACCESS_KEY_ID != '') }}
         run: |
           SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
       - name: make cleanup-kubernetes
