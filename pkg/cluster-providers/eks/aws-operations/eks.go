@@ -147,6 +147,10 @@ func createCluster(ctx context.Context, eksClient *eks.Client,
 		RoleArn: &clusterRoleArn,
 		Version: aws.String(version),
 
+		AccessConfig: &types.CreateAccessConfigRequest{
+			AuthenticationMode:                      types.AuthenticationModeConfigMap,
+			BootstrapClusterCreatorAdminPermissions: aws.Bool(true),
+		},
 		ResourcesVpcConfig: &types.VpcConfigRequest{
 			EndpointPrivateAccess: aws.Bool(true),
 			EndpointPublicAccess:  aws.Bool(true),
