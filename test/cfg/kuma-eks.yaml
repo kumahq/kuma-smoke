@@ -1,0 +1,12 @@
+helmChartName: kuma/kuma
+helmRepoUrl: https://kumahq.github.io/charts
+helmChartPath: "."
+helmSubChartPrefix:
+imageRegistry: kumahq
+namespace: kuma-system
+serviceName: kuma-control-plane
+defaultClusterStartupRetries: 60 # bump this value because fetching containers may take more time than usual
+CNIConf:
+  BinDir: /opt/cni/bin
+  NetDir: /etc/cni/net.d
+  ConfName: 10-aws.conflist
