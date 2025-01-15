@@ -8,6 +8,7 @@ import (
 	"github.com/kong/kubernetes-testing-framework/pkg/clusters/addons/metallb"
 	"github.com/kong/kubernetes-testing-framework/pkg/environments"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/eks"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
 	"github.com/kumahq/kuma-smoke/pkg/utils"
@@ -136,10 +137,7 @@ var k8sCleanupCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		utils.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", k8sCleanupOpt.envName)
-		err = existingCls.Cleanup(ctx)
-		cobra.CheckErr(err)
-
-		return nil
+		return existingCls.Cleanup(ctx)
 	},
 }
 
