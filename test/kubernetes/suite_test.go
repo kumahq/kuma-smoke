@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/blang/semver/v4"
 	cluster_providers "github.com/kumahq/kuma-smoke/pkg/cluster-providers"
+	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/eks"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/gke"
 	_ "github.com/kumahq/kuma-smoke/pkg/cluster-providers/kind"
 	"github.com/kumahq/kuma-smoke/pkg/utils"
