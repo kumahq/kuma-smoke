@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go-v2/service/eks"
-	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/kumahq/kuma-smoke/pkg/cluster-providers/eks/aws-operations"
 	err_pkg "github.com/pkg/errors"
 	"os"
@@ -40,19 +37,9 @@ type Cluster struct {
 	ipFamily        clusters.IPFamily
 }
 
-// NewFromExisting provides a new clusters.Cluster backed by an existing EKS cluster,
+// InitFromExisting provides a new clusters.Cluster backed by an existing EKS cluster,
 // but allows some of the configuration to be filled in from the ENV instead of arguments.
-func NewFromExisting(ctx context.Context, name string) (*Cluster, error) {
-	err := guardOnEnv()
-	if err != nil {
-		return nil, err
-	}
-
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, err_pkg.Wrap(err, "failed to load AWS SDK config")
-	}
-
+func InitFromExisting(ctx context.Context, cfg aws.Config, name string) (*Cluster, error) {
 	restCfg, kubeCfg, err := aws_operations.ClientForCluster(ctx, cfg, name)
 	if err != nil {
 		return nil, err_pkg.Wrapf(err, "failed to get kube client for cluster %s", name)
@@ -113,45 +100,7 @@ func (c *Cluster) Cleanup(ctx context.Context) error {
 		return err_pkg.Wrap(err, "failed to load AWS SDK config")
 	}
 
-	eksClient := eks.NewFromConfig(cfg)
-	ec2Client := ec2.NewFromConfig(cfg)
-	iamClient := iam.NewFromConfig(cfg)
-
-	activeCluster, err := eksClient.DescribeCluster(ctx, &eks.DescribeClusterInput{
-		Name: aws.String(c.name),
-	})
-	if err != nil {
-		return err_pkg.Wrap(err, "failed to read cluster information")
-	}
-
-	vpcID := activeCluster.Cluster.ResourcesVpcConfig.VpcId
-	ngRole, launchTemplateId, err := aws_operations.DeleteNodeGroup(ctx, eksClient, c.name)
-	if err != nil {
-		return err
-	}
-	if launchTemplateId != "" {
-		err = aws_operations.DeleteNodeLaunchTemplate(ctx, ec2Client, launchTemplateId)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = aws_operations.DeleteRoles(ctx, iamClient, []string{ngRole, *activeCluster.Cluster.RoleArn})
-	if err != nil {
-		return err
-	}
-
-	err = aws_operations.DeleteCluster(ctx, eksClient, c.name)
-	if err != nil {
-		return err
-	}
-
-	err = aws_operations.DeleteVPC(ctx, ec2Client, *vpcID)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return aws_operations.DeleteEKSClusterAll(ctx, cfg, c.Name())
 }
 
 func (c *Cluster) Client() *kubernetes.Clientset {

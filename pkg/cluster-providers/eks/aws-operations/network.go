@@ -15,7 +15,7 @@ const (
 	defaultSubnetCIDR2 = "10.163.2.0/24"
 )
 
-func GetAvailabilityZones(ctx context.Context, ec2Client *ec2.Client, region string) ([]string, error) {
+func getAvailabilityZones(ctx context.Context, ec2Client *ec2.Client, region string) ([]string, error) {
 	availabilityZonesOutput, err := ec2Client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to describe availability zones")
@@ -32,7 +32,7 @@ func GetAvailabilityZones(ctx context.Context, ec2Client *ec2.Client, region str
 	return subnetAvZones, nil
 }
 
-func CreateVPC(ctx context.Context, ec2Client *ec2.Client, subnetAvZones []string) (string, []string, error) {
+func createVPC(ctx context.Context, ec2Client *ec2.Client, subnetAvZones []string) (string, []string, error) {
 	vpcOutput, err := ec2Client.CreateVpc(ctx, &ec2.CreateVpcInput{
 		CidrBlock: aws.String(defaultVPCCIDR),
 	})
@@ -131,7 +131,7 @@ func createSubnet(ctx context.Context, ec2Client *ec2.Client, vpcID, cidrBlock, 
 	return *subnetId, nil
 }
 
-func CreateControlPlaneSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, clusterName string) (string, error) {
+func createControlPlaneSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, clusterName string) (string, error) {
 	sg1Output, err := ec2Client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String(fmt.Sprintf("%s-cp", clusterName)),
 		Description: aws.String("Allow communication between the control plane and worker nodes"),
@@ -154,7 +154,7 @@ func CreateControlPlaneSecurityGroup(ctx context.Context, ec2Client *ec2.Client,
 	return *sg1Output.GroupId, nil
 }
 
-func CreateNodeSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, clusterName string, cpDefaultSecurityGroupIds []string) (string, error) {
+func createNodeSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, clusterName string, cpDefaultSecurityGroupIds []string) (string, error) {
 	sgOutput, err := ec2Client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String(fmt.Sprintf("%s-shared-by-all-nodes", clusterName)),
 		Description: aws.String("Allow communication between all nodes in the cluster"),
@@ -216,7 +216,7 @@ func CreateNodeSecurityGroup(ctx context.Context, ec2Client *ec2.Client, vpcId, 
 	return *sgOutput.GroupId, nil
 }
 
-func DeleteVPC(ctx context.Context, ec2Client *ec2.Client, vpcID string) error {
+func deleteVPC(ctx context.Context, ec2Client *ec2.Client, vpcID string) error {
 	routeTablesOutput, err := ec2Client.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
 		Filters: []ec2Types.Filter{
 			{Name: aws.String("vpc-id"), Values: []string{vpcID}},

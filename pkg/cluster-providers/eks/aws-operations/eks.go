@@ -8,6 +8,7 @@ import (
 	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/pkg/errors"
 	"github.com/weaveworks/eksctl/pkg/ami"
 	eksctlapi "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha5"
@@ -15,6 +16,7 @@ import (
 	eksiam "github.com/weaveworks/eksctl/pkg/iam"
 	"github.com/weaveworks/eksctl/pkg/nodebootstrap"
 	"k8s.io/client-go/kubernetes"
+	"os"
 	"time"
 )
 
@@ -22,9 +24,123 @@ const (
 	DefaultNodeGroupName     = "default-node-group"
 	DefaultKubernetesSvcCIDR = "172.20.0.0/16"
 	kubernetesTagFormat      = "kubernetes.io/cluster/%s"
+	envKeyNodeSSHKeyName     = "EKS_NODE_SSH_KEY"
 )
 
-func CreateCluster(ctx context.Context, eksClient *eks.Client,
+func CreateEKSClusterAll(ctx context.Context, cfg aws.Config, clusterName,
+	k8sMinorVersion, nodeMachineType string) error {
+
+	ec2Client := ec2.NewFromConfig(cfg)
+	eksClient := eks.NewFromConfig(cfg)
+	iamClient := iam.NewFromConfig(cfg)
+
+	clusterRoleArn, nodeRoleArn, err := createRoles(ctx, iamClient, clusterName)
+	if err != nil {
+		return errors.Wrap(err, "failed to create IAM roles")
+	}
+	subnetAvZones, err := getAvailabilityZones(ctx, ec2Client, cfg.Region)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get availability zones in region %s", cfg.Region)
+	}
+
+	vpcId, subnetIDs, err := createVPC(ctx, ec2Client, subnetAvZones)
+	if err != nil {
+		return errors.Wrap(err, "failed to create VPC")
+	}
+
+	cpSgId, err := createControlPlaneSecurityGroup(ctx, ec2Client, vpcId, clusterName)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create control plane security group in VPC %s", vpcId)
+	}
+
+	_, err = createCluster(ctx, eksClient, clusterName, clusterRoleArn, k8sMinorVersion, cpSgId, subnetIDs)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create EKS cluster %s", clusterName)
+	}
+
+	activeCluster, err := waitForClusterActive(ctx, eksClient, clusterName)
+	if err != nil {
+		return errors.Wrapf(err, "failed while waiting for EKS cluster %s to become active", clusterName)
+	}
+
+	sgId, err := createNodeSecurityGroup(ctx, ec2Client, vpcId, clusterName, activeCluster.ResourcesVpcConfig.SecurityGroupIds)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create security groups")
+	}
+
+	_, kubeCfg, err := ClientForCluster(ctx, cfg, clusterName)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get kube client for cluster %s", clusterName)
+	}
+
+	err = authorizeNodeGroup(kubeCfg, nodeRoleArn)
+	if err != nil {
+		return errors.Wrapf(err, "failed to authorize node group to access cluster %s", clusterName)
+	}
+
+	amiId, err := resolveAMI(ctx, ec2Client, cfg.Region, k8sMinorVersion, nodeMachineType, eksctlapi.DefaultNodeImageFamily)
+	if err != nil {
+		return errors.Wrap(err, "failed to resolve AMI")
+	}
+
+	clusterCfg := buildClusterConfig(clusterName, k8sMinorVersion, nodeMachineType, cfg.Region, amiId, subnetAvZones)
+	ng := clusterCfg.NodeGroups[0]
+	clusterCfg.VPC.ID = vpcId
+	ng.Subnets = subnetIDs
+	ng.SecurityGroups.AttachIDs = []string{sgId}
+	ng.IAM.InstanceRoleARN = nodeRoleArn
+
+	err = clusterCfg.SetClusterState(activeCluster)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create cluster state object for cluster %s", clusterName)
+	}
+
+	err = createNodeGroup(ctx, eksClient, ec2Client, clusterCfg)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create EKS node group for cluster %s", clusterName)
+	}
+
+	return nil
+}
+
+func DeleteEKSClusterAll(ctx context.Context, cfg aws.Config, clusterName string) error {
+	eksClient := eks.NewFromConfig(cfg)
+	ec2Client := ec2.NewFromConfig(cfg)
+	iamClient := iam.NewFromConfig(cfg)
+
+	activeCluster, err := eksClient.DescribeCluster(ctx, &eks.DescribeClusterInput{
+		Name: aws.String(clusterName),
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to read cluster information")
+	}
+
+	vpcID := activeCluster.Cluster.ResourcesVpcConfig.VpcId
+	ngRole, launchTemplateId, err := deleteNodeGroup(ctx, eksClient, clusterName)
+	if err != nil {
+		return err
+	}
+	if launchTemplateId != "" {
+		err = deleteNodeLaunchTemplate(ctx, ec2Client, launchTemplateId)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = deleteRoles(ctx, iamClient, []string{ngRole, *activeCluster.Cluster.RoleArn})
+	if err != nil {
+		return err
+	}
+
+	err = deleteCluster(ctx, eksClient, clusterName)
+	if err != nil {
+		return err
+	}
+
+	return deleteVPC(ctx, ec2Client, *vpcID)
+}
+
+func createCluster(ctx context.Context, eksClient *eks.Client,
 	clusterName, clusterRoleArn, version, cpSgId string, subnetIDs []string) (*types.Cluster, error) {
 	eksCreateInput := &eks.CreateClusterInput{
 		Name:    &clusterName,
@@ -49,7 +165,38 @@ func CreateCluster(ctx context.Context, eksClient *eks.Client,
 	return clusterOutput.Cluster, nil
 }
 
-func WaitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterName string) (*types.Cluster, error) {
+func buildClusterConfig(clusterName, minorVersion, nodeMachineType, region, amiId string, subnetAvZones []string) *eksctlapi.ClusterConfig {
+	clusterCfg := eksctlapi.NewClusterConfig()
+
+	clusterCfg.Metadata.Name = clusterName
+	clusterCfg.Metadata.Region = region
+	clusterCfg.Metadata.Version = minorVersion
+	clusterCfg.KubernetesNetworkConfig.ServiceIPv4CIDR = DefaultKubernetesSvcCIDR
+	clusterCfg.Status = &eksctlapi.ClusterStatus{}
+
+	ng := clusterCfg.NewNodeGroup()
+	ng.Name = DefaultNodeGroupName
+	ng.ContainerRuntime = aws.String(eksctlapi.ContainerRuntimeContainerD)
+	ng.AMIFamily = eksctlapi.DefaultNodeImageFamily
+	ng.AMI = amiId
+	ng.InstanceType = nodeMachineType
+	ng.AvailabilityZones = subnetAvZones
+	ng.ScalingConfig = &eksctlapi.ScalingConfig{
+		DesiredCapacity: aws.Int(1),
+		MinSize:         aws.Int(1),
+		MaxSize:         aws.Int(1),
+	}
+
+	nodeKeyName := os.Getenv(envKeyNodeSSHKeyName)
+	if nodeKeyName != "" {
+		ng.SSH.Allow = aws.Bool(true)
+		ng.SSH.PublicKeyName = aws.String(nodeKeyName)
+	}
+
+	return clusterCfg
+}
+
+func waitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterName string) (*types.Cluster, error) {
 	childCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Second)
@@ -75,7 +222,7 @@ func WaitForClusterActive(ctx context.Context, eksClient *eks.Client, clusterNam
 	}
 }
 
-func AuthorizeNodeGroup(clientSet kubernetes.Interface, nodeRoleArn string) error {
+func authorizeNodeGroup(clientSet kubernetes.Interface, nodeRoleArn string) error {
 	acm, err := authconfigmap.NewFromClientSet(clientSet)
 	if err != nil {
 		return err
@@ -97,7 +244,7 @@ func AuthorizeNodeGroup(clientSet kubernetes.Interface, nodeRoleArn string) erro
 	return nil
 }
 
-func CreateNodeGroup(ctx context.Context, eksClient *eks.Client, ec2Client *ec2.Client, clusterCfg *eksctlapi.ClusterConfig) error {
+func createNodeGroup(ctx context.Context, eksClient *eks.Client, ec2Client *ec2.Client, clusterCfg *eksctlapi.ClusterConfig) error {
 	nodeGroup := clusterCfg.NodeGroups[0]
 	launchTemplateId, err := createNodeLaunchTemplate(ctx, ec2Client, clusterCfg)
 	if err != nil {
@@ -205,7 +352,7 @@ func createNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, cluste
 	return *output.LaunchTemplate.LaunchTemplateId, nil
 }
 
-func ResolveAMI(ctx context.Context, ec2Client *ec2.Client, region, k8sMinorVersion, instanceType, amiFamily string) (string, error) {
+func resolveAMI(ctx context.Context, ec2Client *ec2.Client, region, k8sMinorVersion, instanceType, amiFamily string) (string, error) {
 	resolver := ami.NewAutoResolver(ec2Client)
 
 	id, err := resolver.Resolve(ctx, region, k8sMinorVersion, instanceType, amiFamily)
@@ -215,7 +362,7 @@ func ResolveAMI(ctx context.Context, ec2Client *ec2.Client, region, k8sMinorVers
 	return id, nil
 }
 
-func DeleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) (string, string, error) {
+func deleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName string) (string, string, error) {
 	var notFoundErr *types.ResourceNotFoundException
 	describeNGInput := &eks.DescribeNodegroupInput{
 		ClusterName:   aws.String(clusterName),
@@ -265,7 +412,7 @@ func DeleteNodeGroup(ctx context.Context, eksClient *eks.Client, clusterName str
 	}
 }
 
-func DeleteNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, launchTemplateId string) error {
+func deleteNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, launchTemplateId string) error {
 	deleteLaunchTmplInput := &ec2.DeleteLaunchTemplateInput{
 		LaunchTemplateId: aws.String(launchTemplateId),
 	}
@@ -276,7 +423,7 @@ func DeleteNodeLaunchTemplate(ctx context.Context, ec2Client *ec2.Client, launch
 	return nil
 }
 
-func DeleteCluster(ctx context.Context, eksClient *eks.Client, clusterName string) error {
+func deleteCluster(ctx context.Context, eksClient *eks.Client, clusterName string) error {
 	var notFoundErr *types.ResourceNotFoundException
 	clusterInput := &eks.DeleteClusterInput{
 		Name: aws.String(clusterName),
