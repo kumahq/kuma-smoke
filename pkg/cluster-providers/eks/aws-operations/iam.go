@@ -1,4 +1,4 @@
-package eks
+package aws_operations
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func createRoles(ctx context.Context, iamClient *iam.Client, namePrefix string) (string, string, error) {
+func CreateRoles(ctx context.Context, iamClient *iam.Client, namePrefix string) (string, string, error) {
 	clusterRoleArn, err := createRole(ctx, iamClient,
 		namePrefix+"-EksClusterRole", "Allows access to other AWS service resources that are required to operate clusters managed by EKS.",
 		[]string{"arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
@@ -73,7 +73,7 @@ func createRole(ctx context.Context, iamClient *iam.Client,
 	return aws.ToString(roleOutput.Role.Arn), nil
 }
 
-func deleteRoles(ctx context.Context, iamClient *iam.Client, roles []string) error {
+func DeleteRoles(ctx context.Context, iamClient *iam.Client, roles []string) error {
 	const splitter = ":role/"
 
 	for _, roleArn := range roles {

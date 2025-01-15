@@ -1,4 +1,4 @@
-package eks
+package aws_operations
 
 import (
 	"context"
@@ -18,7 +18,7 @@ const (
 	clusterIDHeader = "x-k8s-aws-id"
 )
 
-func clientForCluster(ctx context.Context, awsCfg aws.Config, clusterName string) (*rest.Config, *kubernetes.Clientset, error) {
+func ClientForCluster(ctx context.Context, awsCfg aws.Config, clusterName string) (*rest.Config, *kubernetes.Clientset, error) {
 	eksClient := eks.NewFromConfig(awsCfg)
 	stsClient := sts.NewFromConfig(awsCfg)
 
