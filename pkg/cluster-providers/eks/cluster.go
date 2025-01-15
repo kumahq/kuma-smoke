@@ -28,13 +28,12 @@ import (
 
 // Cluster is a clusters.Cluster implementation backed by AWS Elastic Kubernetes Service (EKS)
 type Cluster struct {
-	name            string
-	waitForTeardown bool
-	client          *kubernetes.Clientset
-	cfg             *rest.Config
-	addons          clusters.Addons
-	l               *sync.RWMutex
-	ipFamily        clusters.IPFamily
+	name     string
+	client   *kubernetes.Clientset
+	cfg      *rest.Config
+	addons   clusters.Addons
+	l        *sync.RWMutex
+	ipFamily clusters.IPFamily
 }
 
 // InitFromExisting provides a new clusters.Cluster backed by an existing EKS cluster,
