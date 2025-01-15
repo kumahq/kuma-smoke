@@ -15,8 +15,7 @@ import (
 // Builder generates clusters.Cluster objects backed by GKE given
 // provided configuration options.DeleteVPC
 type Builder struct {
-	Name            string
-	waitForTeardown bool
+	Name string
 
 	addons          clusters.Addons
 	clusterVersion  *semver.Version
@@ -54,15 +53,6 @@ func (b *Builder) WithClusterVersion(version semver.Version) *Builder {
 
 func (b *Builder) WithNodeMachineType(machineType string) *Builder {
 	b.nodeMachineType = machineType
-	return b
-}
-
-// WithWaitForTeardown sets a flag telling whether the cluster should wait for
-// a cleanup operation synchronously.
-//
-// Default: `false`.
-func (b *Builder) WithWaitForTeardown(wait bool) *Builder {
-	b.waitForTeardown = wait
 	return b
 }
 
