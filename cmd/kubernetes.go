@@ -137,10 +137,7 @@ var k8sCleanupCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		utils.CmdStdErr(cmd, "cleaning up cluster of environment %s\n", k8sCleanupOpt.envName)
-		err = existingCls.Cleanup(ctx)
-		cobra.CheckErr(err)
-
-		return nil
+		return existingCls.Cleanup(ctx)
 	},
 }
 
