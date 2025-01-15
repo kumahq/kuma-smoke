@@ -56,6 +56,7 @@ cleanup-kubernetes:
 
 .PHONY: run
 run: fetch-product deploy-kubernetes
+	$(eval ENV_NAME=$(shell kubectl --kubeconfig=$(TOP)/build/kubernetes/cluster.config config view -o jsonpath='{.clusters[0].name}'))
 	mkdir -p $(TOP)/build/debug-output
-	$(E2E_ENV_VARS) KUBECONFIG=$(TOP)/build/kubernetes/cluster.config $(GINKGO) -v --timeout=4h --json-report=raw-report.json ./test/...
+	$(E2E_ENV_VARS) SMOKE_ENV_TYPE=$(SMOKE_ENV_TYPE) SMOKE_ENV_NAME=$(ENV_NAME) $(GINKGO) -v --timeout=4h --json-report=raw-report.json ./test/...
 	$(MAKE) cleanup-kubernetes
