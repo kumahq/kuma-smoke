@@ -113,6 +113,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 15 }}
   # we need a unified way to be the "expected check" by the GitHub branch production rule
   finalize:
+    name: Finalize
     needs: ["check", "build-test"]
     timeout-minutes: 10
     if: ${{ always() }}
@@ -121,7 +122,7 @@ jobs:
       - name: "Halt if there are previous failures"
         run: |-
           echo "results: ${{ toJson(needs.*.result) }}"
-          # for some reason, GH Action will always trigger a downstream job even if there are errors in an dependent job
+          # for some reason, GH Action will always trigger a downstream job even if there are errors in a dependent job
           # so we manually check it here. An example could be found here: https://github.com/kumahq/kuma/actions/runs/7044980149
           [[ ${{ contains(needs.*.result, 'failure')|| contains(needs.*.result, 'cancelled') }} == "true" ]] && exit 1
           echo "All dependent jobs succeeded"
