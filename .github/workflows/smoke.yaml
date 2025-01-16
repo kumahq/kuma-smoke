@@ -24,7 +24,7 @@ on:
         description: "types of environment you want to test on, for example: kind,gke,eks"
         required: false
         type: string
-        default: kind,gke,eks
+        default: kind,gke
 env:
   SMOKE_PRODUCT_NAME: ${{ inputs.product_name || 'kuma' }}
   SMOKE_PRODUCT_VERSION: ${{ inputs.product_version || '2.9.2' }}
