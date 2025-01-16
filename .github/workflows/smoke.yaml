@@ -57,7 +57,7 @@ jobs:
           env_types: ${{ inputs.environments || 'kind' }}
         run: |
           TYPES_JSON=$(echo -n "[\"$env_types\"]" | tr ' ' ',' | sed 's/,/","/g')
-          echo "env_types='${TYPES_JSON}'" >> "$GITHUB_OUTPUT"
+          echo "env_types=${TYPES_JSON}" >> "$GITHUB_OUTPUT"
   build-test:
     name: Build and test
     timeout-minutes: 60
