@@ -1,5 +1,5 @@
 name: Smoke
-run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || '') ) }}
+run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || (github.event_name == 'push' && github.event.head_commit.message || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || ''))) }}
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -111,3 +111,18 @@ jobs:
             raw-report.json
             build/debug-output/*.log
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 15 }}
+  # we need a unified way to be the "expected check" by the GitHub branch production rule
+  finalize:
+    name: Finalize
+    needs: ["check", "build-test"]
+    timeout-minutes: 10
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Halt if there are previous failures"
+        run: |-
+          echo "results: ${{ toJson(needs.*.result) }}"
+          # for some reason, GH Action will always trigger a downstream job even if there are errors in a dependent job
+          # so we manually check it here. An example could be found here: https://github.com/kumahq/kuma/actions/runs/7044980149
+          [[ ${{ contains(needs.*.result, 'failure')|| contains(needs.*.result, 'cancelled') }} == "true" ]] && exit 1
+          echo "All dependent jobs succeeded"
