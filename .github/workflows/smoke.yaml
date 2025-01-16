@@ -1,5 +1,5 @@
 name: Smoke
-run-name: Smoke test for ${{ inputs.product_name || 'kuma' }} ${{ inputs.product_version || '' }}
+run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || '') ) }}
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -36,9 +36,9 @@ jobs:
     outputs:
       env_types: ${{ steps.make-env-type-array.outputs.env_types }}
     steps:
-      - name: Checkout
+      - name: checkout
         uses: actions/checkout@v4
-      - name: Setup go
+      - name: setup go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
@@ -53,6 +53,7 @@ jobs:
           args: --timeout=10m --verbose
           skip-cache: true
       - id: make-env-type-array
+        name: make env matrix
         env:
           env_types: ${{ inputs.environments || 'kind' }}
         run: |
@@ -78,14 +79,14 @@ jobs:
       fail-fast: false
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
     steps:
-      - name: ensure required settings
+      - name: fail on missing required settings
         if: ${{ (matrix.envPlatform == 'gke' && env.GOOGLE_PROJECT == '') || (matrix.envPlatform == 'eks' && env.AWS_ACCESS_KEY_ID == '') }}
         run: |
           echo 'Required settings are missing to run tests on platform ${{ matrix.envPlatform }}'
           exit 1
-      - name: Checkout
+      - name: checkout
         uses: actions/checkout@v4
-      - name: Setup go
+      - name: setup go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
