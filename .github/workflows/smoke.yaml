@@ -55,7 +55,7 @@ jobs:
       - id: make-env-type-array
         env:
           env_types: ${{ inputs.environments || 'kind' }}
-        run:
+        run: |
           TYPES_JSON=$(echo -n "[\"$env_types\"]" | tr ' ' ',' | sed 's/,/","/g')
           echo "env_types='${TYPES_JSON}'" >> "$GITHUB_OUTPUT"
   build-test:
