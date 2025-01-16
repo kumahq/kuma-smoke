@@ -1,0 +1,113 @@
+name: Smoke
+run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || '') ) }}
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      product_name:
+        description: "the product to test, supported values are kuma and kong-mesh"
+        required: false
+        type: string
+        default: kuma
+      product_version:
+        description: "full version of the product you want to test, for example: 2.9.2"
+        required: false
+        type: string
+        default: 2.9.2
+      environments:
+        description: "types of environment you want to test on, for example: kind,gke,eks"
+        required: false
+        type: string
+        default: kind,gke
+env:
+  SMOKE_PRODUCT_NAME: ${{ inputs.product_name || 'kuma' }}
+  SMOKE_PRODUCT_VERSION: ${{ inputs.product_version || '2.9.2' }}
+  CI_TOOLS_DIR: "/home/runner/work/kuma-smoke/.ci_tools"
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    outputs:
+      env_types: ${{ steps.make-env-type-array.outputs.env_types }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: make dev/tools
+        run: make dev/tools
+      - name: make check
+        run: make check
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=10m --verbose
+          skip-cache: true
+      - id: make-env-type-array
+        name: make env matrix
+        env:
+          env_types: ${{ inputs.environments || 'kind' }}
+        run: |
+          TYPES_JSON=$(echo -n "[\"$env_types\"]" | tr ' ' ',' | sed 's/,/","/g')
+          echo "env_types=${TYPES_JSON}" >> "$GITHUB_OUTPUT"
+  build-test:
+    name: Build and test
+    timeout-minutes: 60
+    needs:
+      - check
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
+      GOOGLE_LOCATION: ${{ secrets.GOOGLE_LOCATION }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    strategy:
+      matrix:
+        envPlatform: ${{ fromJSON( needs.check.outputs.env_types ) }}
+      fail-fast: false
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci/skip-test') }}
+    steps:
+      - name: fail on missing required settings
+        if: ${{ (matrix.envPlatform == 'gke' && env.GOOGLE_PROJECT == '') || (matrix.envPlatform == 'eks' && env.AWS_ACCESS_KEY_ID == '') }}
+        run: |
+          echo 'Required settings are missing to run tests on platform ${{ matrix.envPlatform }}'
+          exit 1
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: make dev/tools
+        run: |
+          make dev/tools
+          echo "${CI_TOOLS_DIR}/bin" >> $GITHUB_PATH
+      - name: make build
+        run: make build
+      - name: make run
+        run: |
+          SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
+      - name: make cleanup-kubernetes
+        if: always()
+        run: make cleanup-kubernetes
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        if: always()
+        with:
+          name: smoke-report-${{ matrix.envPlatform }}
+          if-no-files-found: ignore
+          path: |
+            raw-report.json
+            build/debug-output/*.log
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 15 }}

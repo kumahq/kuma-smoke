@@ -119,7 +119,6 @@ var _ = SynchronizedBeforeSuite(func() {
 	kubeconfigPath = file.Name()
 	cluster = NewK8sCluster(NewTestingT(), "kuma-smoke", true)
 	cluster.WithKubeConfig(kubeconfigPath)
-	fmt.Printf("using kubeconfig: %s\n", kubeconfigPath)
 
 	envType := os.Getenv("SMOKE_ENV_TYPE")
 	envName := os.Getenv("SMOKE_ENV_NAME")
