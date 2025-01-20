@@ -11,7 +11,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/spf13/cobra v1.8.1
-	github.com/weaveworks/eksctl v0.200.1-0.20250111135130-435cf341ad56
+	github.com/weaveworks/eksctl v0.201.0
 	k8s.io/api v0.32.0 // indirect
 	k8s.io/apimachinery v0.32.0
 	k8s.io/client-go v0.32.0
