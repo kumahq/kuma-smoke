@@ -63,6 +63,8 @@ jobs:
       - check
     runs-on: ubuntu-latest
     env:
+      SMOKE_ENV_TYPE: ${{ matrix.envPlatform }}
+
       GOOGLE_PROJECT: ${{ secrets.GOOGLE_PROJECT }}
       GOOGLE_LOCATION: ${{ secrets.GOOGLE_LOCATION }}
       GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
@@ -94,8 +96,7 @@ jobs:
       - name: make build
         run: make build
       - name: make run
-        run: |
-          SMOKE_ENV_TYPE=${{ matrix.envPlatform }} make run
+        run: make run
       - name: make cleanup-kubernetes
         if: always()
         run: make cleanup-kubernetes
