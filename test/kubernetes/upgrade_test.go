@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/kumahq/kuma/pkg/config/core"
@@ -71,15 +70,7 @@ func Upgrade() {
 
 		It("should run the demo app with mTLS and gateways", func() {
 			By("install the demo app and wait for it to become ready")
-			demoAppYAML, err := cluster.GetKumactlOptions().RunKumactlAndGetOutput("install", "demo",
-				"--namespace", TestNamespace,
-				"--system-namespace", Config.KumaNamespace)
-			// in 2.8.x and older versions, the YAML generated from "kumactl install demo" has a bug in their MeshHTTPRoute resources
-			// causing the kuma.io/service tag fail to support changing app namespace
-			demoAppYAML = strings.Replace(demoAppYAML,
-				"demo-app-gateway_kuma-demo_svc",
-				fmt.Sprintf("demo-app-gateway_%s_svc", TestNamespace), -1)
-
+			demoAppYAML, err := generateDemoAppYAML(cluster.GetKumactlOptions(), TestNamespace, Config.KumaNamespace)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
 

@@ -6,6 +6,7 @@ import (
 	"github.com/gruntwork-io/terratest/modules/retry"
 	"github.com/gruntwork-io/terratest/modules/testing"
 	"github.com/kumahq/kuma/test/framework/deployments/kic"
+	"github.com/kumahq/kuma/test/framework/kumactl"
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
@@ -81,11 +82,8 @@ spec:
 
 		It("should support running the demo app with builtin gateway", func() {
 			By("install the demo app and wait for it to become ready")
-			kumactl := NewKumactlOptionsE2E(cluster.GetTesting(), cluster.Name(), true)
-			demoAppYAML, err := kumactl.RunKumactlAndGetOutput("install", "demo",
-				"--namespace", TestNamespace,
-				"--system-namespace", Config.KumaNamespace)
-
+			kumactlOpts := NewKumactlOptionsE2E(cluster.GetTesting(), cluster.Name(), true)
+			demoAppYAML, err := generateDemoAppYAML(kumactlOpts, TestNamespace, Config.KumaNamespace)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cluster.Install(YamlK8s(demoAppYAML))).To(Succeed())
 
@@ -181,6 +179,22 @@ spec:
 		Entry("kumactl, kuma-init (CNI disabled)", KumactlInstallationMode, cniDisabled),
 		Entry("helm, kuma-cni (CNI enabled)", HelmInstallationMode, cniEnabled),
 	)
+}
+
+func generateDemoAppYAML(kumactlOpts *kumactl.KumactlOptions, appNamespace, kumaNamespace string) (string, error) {
+	demoAppYAML, err := kumactlOpts.RunKumactlAndGetOutput("install", "demo",
+		"--namespace", appNamespace,
+		"--system-namespace", kumaNamespace)
+	if err != nil {
+		return "", err
+	}
+
+	// in 2.8.x and older versions, the YAML generated from "kumactl install demo" has a bug in their MeshHTTPRoute resources
+	// causing the kuma.io/service tag fail to support changing app namespace
+	demoAppYAML = strings.Replace(demoAppYAML,
+		"demo-app-gateway_kuma-demo_svc",
+		fmt.Sprintf("demo-app-gateway_%s_svc", appNamespace), -1)
+	return demoAppYAML, nil
 }
 
 func meshTrafficPermission(namespace string) string {
