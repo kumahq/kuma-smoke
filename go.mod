@@ -24,13 +24,13 @@ require (
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.32.8
+	github.com/aws/aws-sdk-go-v2 v1.34.0
 	github.com/aws/aws-sdk-go-v2/config v1.28.9
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.193.0
 	github.com/aws/aws-sdk-go-v2/service/eks v1.56.1
 	github.com/aws/aws-sdk-go-v2/service/iam v1.38.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.5
-	github.com/aws/smithy-go v1.22.1
+	github.com/aws/smithy-go v1.22.2
 	github.com/google/uuid v1.6.0
 	github.com/kris-nova/logger v0.2.2
 	github.com/pkg/errors v0.9.1
