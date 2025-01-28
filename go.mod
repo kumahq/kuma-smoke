@@ -26,7 +26,7 @@ require (
 require (
 	github.com/aws/aws-sdk-go-v2 v1.34.0
 	github.com/aws/aws-sdk-go-v2/config v1.28.9
-	github.com/aws/aws-sdk-go-v2/service/ec2 v1.193.0
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.201.1
 	github.com/aws/aws-sdk-go-v2/service/eks v1.56.1
 	github.com/aws/aws-sdk-go-v2/service/iam v1.38.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.5
@@ -58,8 +58,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.50 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.23 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.41 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.27 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.27 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.29 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.24 // indirect
 	github.com/aws/aws-sdk-go-v2/service/acm v1.30.6 // indirect
@@ -72,10 +72,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.52.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing v1.28.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.43.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.4.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.10.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.12.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.12.10 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.18.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/kms v1.37.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.69.0 // indirect
