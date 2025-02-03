@@ -1,5 +1,5 @@
 name: Smoke
-run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || (github.event_name == 'push' && github.event.head_commit.message || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || ''))) }}
+run-name: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || (github.event_name == 'push' && 'smoke test on main branch' || format( 'smoke test on {0} {1}', (inputs.product_name || 'kuma'), (inputs.product_version || ''))) }}
 on:
   pull_request: {}
   push:
