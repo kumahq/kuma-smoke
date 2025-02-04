@@ -14,6 +14,9 @@ updates:
       go.opentelemetry.io:
         patterns:
           - "go.opentelemetry.io/*"
+      aws-sdk-go-v2:
+        patterns:
+          - "github.com/aws/aws-sdk-go-v2*"
     ignore:
       # go-control-plane v0.12.0 introduced a potential deadlock issue. This issue is
       # being tracked in https://github.com/envoyproxy/go-control-plane/issues/875.
