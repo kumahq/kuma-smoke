@@ -11,7 +11,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/spf13/cobra v1.8.1
-	github.com/weaveworks/eksctl v0.200.1-0.20250111135130-435cf341ad56
+	github.com/weaveworks/eksctl v0.203.0
 	k8s.io/api v0.32.1 // indirect
 	k8s.io/apimachinery v0.32.1
 	k8s.io/client-go v0.32.1
@@ -54,7 +54,7 @@ require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/avast/retry-go/v4 v4.6.0 // indirect
 	github.com/aws/aws-sdk-go v1.51.16 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.7 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.8 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.57 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.27 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.41 // indirect
@@ -63,15 +63,15 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.2 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.24 // indirect
 	github.com/aws/aws-sdk-go-v2/service/acm v1.30.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.51.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/cloudformation v1.56.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.46.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.45.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.51.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudformation v1.56.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.47.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.45.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.37.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.36.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.52.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing v1.28.9 // indirect
-	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.43.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing v1.28.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.43.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.4.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.10.5 // indirect
@@ -79,14 +79,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.18.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/kms v1.37.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.69.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/outposts v1.48.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/outposts v1.48.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/rds v1.91.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.46.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.69.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.34.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sns v1.33.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.37.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.56.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.56.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.24.14 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.28.13 // indirect
 	github.com/awslabs/amazon-eks-ami/nodeadm v0.0.0-20240508073157-fbfa1bc129f5 // indirect
@@ -148,6 +148,7 @@ require (
 	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/hoisie/mustache v0.0.0-20160804235033-6375acf62c69 // indirect
 	github.com/homeport/dyff v1.6.0 // indirect
+	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -214,14 +215,13 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	goformation/v4 v4.0.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	golang.org/x/tools v0.28.0 // indirect
