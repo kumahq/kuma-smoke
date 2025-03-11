@@ -2,17 +2,18 @@ SMOKE_PRODUCT_NAME ?= kuma
 SMOKE_PRODUCT_VERSION ?= 2.9.2
 SMOKE_ENV_TYPE ?= kind
 
-# Extract major, minor, and patch versions
-MAJOR := $(word 1,$(subst ., ,$(SMOKE_PRODUCT_VERSION)))
-MINOR := $(word 2,$(subst ., ,$(SMOKE_PRODUCT_VERSION)))
-PATCH := $(word 3,$(subst ., ,$(SMOKE_PRODUCT_VERSION)))
+CLEAN_VERSION := $(word 1,$(subst -, ,$(SMOKE_PRODUCT_VERSION)))
+MAJOR := $(word 1,$(subst ., ,$(CLEAN_VERSION)))
+MINOR := $(word 2,$(subst ., ,$(CLEAN_VERSION)))
+PATCH := $(word 3,$(subst ., ,$(CLEAN_VERSION)))
 
 PREV_MINOR := $(if $(filter-out 1,$(MAJOR)),$(shell echo $$(($(MINOR)-1))),$(MINOR))
 SMOKE_PRODUCT_VERSION_PREV_MINOR := $(MAJOR).$(PREV_MINOR).0
 KUMACTLBIN_PREV_MINOR = $(TOP)/build/$(SMOKE_PRODUCT_NAME)-$(SMOKE_PRODUCT_VERSION_PREV_MINOR)/bin/kumactl
 
 PREV_PATCH := $(if $(filter-out 0,$(PATCH)),$(shell echo $$(($(PATCH)-1))),0)
-SMOKE_PRODUCT_VERSION_PREV_PATCH := $(MAJOR).$(MINOR).$(PREV_PATCH)
+IS_PREVIEW := $(findstring preview,$(SMOKE_PRODUCT_VERSION))
+SMOKE_PRODUCT_VERSION_PREV_PATCH := $(if $(and $(IS_PREVIEW),$(filter 0,$(PATCH))),$(SMOKE_PRODUCT_VERSION),$(MAJOR).$(MINOR).$(PREV_PATCH))
 KUMACTLBIN_PREV_PATCH = $(TOP)/build/$(SMOKE_PRODUCT_NAME)-$(SMOKE_PRODUCT_VERSION_PREV_PATCH)/bin/kumactl
 
 KUMACTLBIN = $(TOP)/build/$(SMOKE_PRODUCT_NAME)-$(SMOKE_PRODUCT_VERSION)/bin/kumactl
