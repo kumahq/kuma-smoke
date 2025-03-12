@@ -35,6 +35,11 @@ func Install() {
 	kicName := "kic"
 
 	DescribeTableSubtree("install Kuma and run smoke scenarios", func(installMode InstallationMode, cni cniMode) {
+		if len(targetVersion.Pre) > 0 && installMode == HelmInstallationMode {
+			Logf("Skipping because we don't have helm chart support for preview versions")
+			return
+		}
+
 		BeforeAll(func() {
 			if installMode == HelmInstallationMode {
 				setupHelmRepo(cluster.GetTesting())

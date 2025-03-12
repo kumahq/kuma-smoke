@@ -31,6 +31,10 @@ func Upgrade() {
 			Logf("Skipping because the previous version is the same as the current version %s", targetVersion)
 			return
 		}
+		if len(targetVersion.Pre) > 0 && installMode == HelmInstallationMode {
+			Logf("Skipping because we don't have helm chart support for preview versions")
+			return
+		}
 		targetVerKumactl := Config.KumactlBin
 		targetVerImageTag := Config.KumaImageTag
 
