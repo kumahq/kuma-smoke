@@ -19,7 +19,10 @@ import (
 	"time"
 )
 
+var targetVersion, prevMinorVersion, prevPatchVersion semver.Version
+
 func TestE2E(t *testing.T) {
+	parseProductVersions()
 	test.RunE2ESpecs(t, "Kuma Smoke Suite - Kubernetes")
 }
 
@@ -29,7 +32,6 @@ var (
 )
 
 var cluster *K8sCluster
-var targetVersion, prevMinorVersion, prevPatchVersion semver.Version
 var kubeconfigPath string
 var kubeConfigExportChannel chan struct{}
 
@@ -95,7 +97,7 @@ func exportKubeConfigPeriodically(envType string, envName string, exportPath str
 	}
 }
 
-var _ = SynchronizedBeforeSuite(func() {
+func parseProductVersions() {
 	var err error
 	targetVersion, err = semver.Parse(strings.TrimPrefix(Config.KumaImageTag, "v"))
 	if err != nil {
@@ -110,7 +112,9 @@ var _ = SynchronizedBeforeSuite(func() {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to parse previous patch version: %s", os.Getenv("SMOKE_PRODUCT_VERSION_PREV_PATCH")))
 	}
+}
 
+var _ = SynchronizedBeforeSuite(func() {
 	file, err := os.CreateTemp("", "kuma-smoke")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create temp file: %s", err))
